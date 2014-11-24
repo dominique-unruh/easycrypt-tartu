@@ -2,7 +2,7 @@
 
 set -e
 
-git pull -a
+git pull --all
 git status
 sleep 5
 
