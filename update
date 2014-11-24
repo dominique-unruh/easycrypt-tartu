@@ -1,0 +1,12 @@
+#!/bin/bash
+
+set -e
+
+git pull -a
+git status
+sleep 5
+
+. scripts/activate-toolchain.sh
+make update-toolchain
+make provers
+make
