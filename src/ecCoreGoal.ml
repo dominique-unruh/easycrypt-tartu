@@ -844,6 +844,14 @@ let opened (pf : proof) =
                      FApi.get_pregoal_by_id hd pf.pr_env)
 
 (* -------------------------------------------------------------------- *)
+let opened_all (pf : proof) =
+  match pf.pr_opened with
+  | [] -> None
+  | ids -> Some (List.length pf.pr_opened,
+               List.map (fun id -> FApi.get_pregoal_by_id id pf.pr_env) ids);;
+
+
+(* -------------------------------------------------------------------- *)
 let closed (pf : proof) = List.isempty pf.pr_opened
 
 (* -------------------------------------------------------------------- *)

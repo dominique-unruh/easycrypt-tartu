@@ -671,14 +671,19 @@ let pp_current_goal stream =
       | S.PSCheck pf -> begin
           let ppe = EcPrinting.PPEnv.ofenv (S.env scope) in
 
-          match EcCoreGoal.opened pf with
+          match EcCoreGoal.opened_all pf with
           | None -> Format.fprintf stream "No more goals@\n%!"
 
-          | Some (n, { EcCoreGoal.g_hyps  = hyps;
+          (*| Some (n, { EcCoreGoal.g_hyps  = hyps;
                        EcCoreGoal.g_concl = concl; })
             ->
-              let g = EcEnv.LDecl.tohyps hyps, concl in
-                EcPrinting.pp_goal ppe stream (n, g)
+            let g = EcEnv.LDecl.tohyps hyps, concl in
+                EcPrinting.pp_goal ppe stream (n, g); *)
+	  | Some (n, goals) -> List.iteri
+	    (fun i -> fun { EcCoreGoal.g_hyps  = hyps;
+			    EcCoreGoal.g_concl = concl; } -> 
+	      let g = EcEnv.LDecl.tohyps hyps, concl in
+	      EcPrinting.pp_goal ppe stream ((if i=0 then n else -1), g)) goals
       end
   end
 
