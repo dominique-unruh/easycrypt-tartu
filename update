@@ -2,7 +2,8 @@
 
 set -e
 
-git pull --all
+git pull utartu 1.0
+git pull origin 1.0
 git status
 sleep 5
 
