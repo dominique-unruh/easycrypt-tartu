@@ -135,9 +135,10 @@ type validation =
 | VExtern  : 'a * handle list -> validation
 
 (* -------------------------------------------------------------------- *)
-val tcenv1_of_proof : proof  -> tcenv1
-val tcenv_of_proof  : proof  -> tcenv
-val proof_of_tcenv  : tcenv  -> proof
+val tcenv1_of_proof   : proof  -> tcenv1
+val tcenv_of_proof    : proof  -> tcenv
+val proof_of_tcenv    : tcenv  -> proof
+val proofenv_of_proof : proof  -> proofenv
 
 (* Start a new interactive proof in a given local context
  * [LDecl.hyps] for given [form]. Mainly, a [proof] records the set
@@ -149,6 +150,9 @@ val start : LDecl.hyps -> form -> proof
  * number of open goals. *)
 val opened : proof -> (int * pregoal) option
 val opened_all : proof -> (int * pregoal list) option
+
+(* Return the list of opened goals - by handle *)
+val all_opened : proof -> handle list
 
 (* Check if a proof is done *)
 val closed : proof -> bool
