@@ -11,3 +11,5 @@ sleep 5
 make update-toolchain
 make provers
 make
+make -C doc/userman
+make -C doc/refman
