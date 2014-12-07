@@ -83,16 +83,14 @@ end
 
 (* -------------------------------------------------------------------- *)
 module Ty : sig
-  type tydname = (ptyparams * psymbol) located
-
-  val add : scope -> tydname -> pqsymbol list -> scope
+  val add : scope -> ptydname -> pqsymbol list -> scope
 
   val add_class    : scope -> ptypeclass located -> scope
   val add_instance : scope -> Ax.mode -> ptycinstance located -> scope
-  val add_datatype : scope -> tydname -> pdatatype -> scope
-  val add_record   : scope -> tydname -> precord -> scope
+  val add_datatype : scope -> ptydname -> pdatatype -> scope
+  val add_record   : scope -> ptydname -> precord -> scope
 
-  val define : scope -> tydname -> pty -> scope
+  val define : scope -> ptydname -> pty -> scope
 end
 
 (* -------------------------------------------------------------------- *)
@@ -158,10 +156,17 @@ end
 
 (* -------------------------------------------------------------------- *)
 module Prover : sig
+  type options = {
+    po_timeout   : int option;
+    po_cpufactor : int option;
+    po_nprovers  : int option;
+    po_provers   : string list option;
+  }
+
   val process     : scope -> pprover_infos -> scope
   val set_wrapper : scope -> string option -> scope
   val set_all     : scope -> scope
-  val set_default : scope -> timeout:int -> nprovers:int -> string list option -> scope
+  val set_default : scope -> options -> scope
   val full_check  : scope -> scope
   val check_proof : scope -> bool -> scope
 end

@@ -81,23 +81,34 @@ let t_kill_r side cpos olen tc =
   t_code_transform side ~bdhoare:true cpos tr (t_zip kill_stmt) tc
 
 (* -------------------------------------------------------------------- *)
-let alias_stmt id (pf, _) me i =
+let alias_stmt env id (pf, _) me i =
+  let dopv ty = 
+    let id       = odfl "x" (omap EcLocation.unloc id) in 
+    let id       = { v_name = id; v_type = ty; } in
+    let (me, id) = fresh_pv me id in
+    let pv       = pv_loc (EcMemory.xpath me) id in
+    me, pv in
+
   match i.i_node with
+  | Sasgn(lv,e) ->
+    let ty = e.e_ty in
+    let (me, pv) = dopv ty in
+    (me, [i_asgn (LvVar (pv, ty), e); i_asgn (lv, e_var pv ty)])
   | Srnd (lv, e) ->
-      let id       = odfl "x" (omap EcLocation.unloc id) in
-      let ty       = e.e_ty in
-      let id       = { v_name = id; v_type = ty; } in
-      let (me, id) = fresh_pv me id in
-      let pv       = pv_loc (EcMemory.xpath me) id in
-
-        (me, [i_rnd (LvVar (pv, ty), e); i_asgn (lv, e_var pv ty)])
-
+    let ty       = proj_distr_ty env e.e_ty in
+    let (me, pv) = dopv ty in
+    (me, [i_rnd (LvVar (pv, ty), e); i_asgn (lv, e_var pv ty)])
+  | Scall (Some lv, f, args) ->
+    let ty       = (EcEnv.Fun.by_xpath f env).f_sig.fs_ret in
+    let (me, pv) = dopv ty in
+    (me, [i_call (Some (LvVar (pv, ty)), f ,args); i_asgn (lv, e_var pv ty)])
   | _ ->
       tc_error pf "cannot create an alias for that kind of instruction"
 
 let t_alias_r side cpos id g =
+  let env = FApi.tc1_env g in
   let tr = fun side -> `Alias (side, cpos) in
-  t_code_transform side ~bdhoare:true cpos tr (t_fold (alias_stmt id)) g
+  t_code_transform side ~bdhoare:true cpos tr (t_fold (alias_stmt env id)) g
 
 (* -------------------------------------------------------------------- *)
 let set_stmt (fresh, id) e =

@@ -134,7 +134,8 @@ let pp_modappl_error fmt error =
   | MAE_AccesSubModFunctor ->
       msg "cannot access a sub-module of a partially applied functor"
 
-let pp_tyerror fmt env error =
+let pp_tyerror env fmt error =
+  let env   = EcPrinting.PPEnv.ofenv env in
   let msg x = Format.fprintf fmt x in
   let pp_type fmt ty = EcPrinting.pp_type env fmt ty in
 
@@ -346,7 +347,7 @@ let () =
   let pp fmt exn =
     match exn with
     | TyError (_, env, e) ->
-        pp_tyerror fmt (EcPrinting.PPEnv.ofenv env) e
+        pp_tyerror env fmt e
     | _ -> raise exn
   in
     EcPException.register pp
@@ -2074,24 +2075,27 @@ and translvalue ue (env : EcEnv.env) lvalue =
   | PLvMap (x, tvi, e) ->
       let tvi = tvi |> omap (transtvi env ue) in
       let codomty = UE.fresh ue in
-      let pv,xty = trans_pv env x in
+      let pv, xty = trans_pv env x in
       let e, ety = transexp env `InProc ue e in
-      let name =  ([],EcCoreLib.s_set) in
+      let name = ([], EcCoreLib.s_set) in
       let esig = [xty; ety; codomty] in
       let ops = select_exp_op env `InProc None name ue tvi esig in
 
       match ops with
       | [] ->
           let esig = Tuni.offun_dom (EcUnify.UniEnv.assubst ue) esig in
-            tyerror x.pl_loc env (UnknownVarOrOp (name, esig))
+          tyerror x.pl_loc env (UnknownVarOrOp (name, esig))
 
-      | [{ e_node = Eop (p, tys) }, _, subue, _] ->
+      | [{ e_node = Eop (p, tys) }, opty, subue, _] ->
           EcUnify.UniEnv.restore ~src:subue ~dst:ue;
+          let esig = Tuni.offun_dom (EcUnify.UniEnv.assubst ue) esig in
+          let esig = toarrow esig xty in
+          unify_or_fail env ue lvalue.pl_loc ~expct:esig opty;
           (LvMap ((p, tys), pv, e, xty), codomty)
 
-      | [_] ->                          (* FIXME: dubious *)
+      | [_] ->
           let esig = Tuni.offun_dom (EcUnify.UniEnv.assubst ue) esig in
-            tyerror x.pl_loc env (UnknownVarOrOp (name, esig))
+          tyerror x.pl_loc env (UnknownVarOrOp (name, esig))
 
       | _ ->
           let esig = Tuni.offun_dom (EcUnify.UniEnv.assubst ue) esig in
