@@ -1571,7 +1571,7 @@ intro_pattern:
 | LLARROW
    { IPSubst `RtoL }
 
-| LBRACE xs=ident+ RBRACE
+| LBRACE xs=loc(intro_pattern_1_name)+ RBRACE
    { IPClear xs }
 
 | SLASHSLASH
@@ -1864,7 +1864,7 @@ logtactic:
 | MOVE COLON gp=genpattern+
    { Pgeneralize gp }
 
-| CLEAR l=ident+
+| CLEAR l=loc(intro_pattern_1_name)+
    { Pclear l }
 
 | CONGR
@@ -2542,23 +2542,29 @@ print:
 | GOAL        n=int              { Pr_goal n  }
 
 prover_iconfig:
-| /* empty */     { (None   , None   ) }
-| i=uint          { (Some i , None   ) }
-| i1=uint i2=uint { (Some i1, Some i2) }
+| /* empty */        { (None  , None  ) }
+| i=uint
+| i=uint UNDERSCORE  { (Some i, None  ) }
+| UNDERSCORE j=uint  { (None  , Some j) }
+| i=uint j=uint      { (Some i, Some j) }
 
 prover_info:
 | ic=prover_iconfig pl=plist1(loc(STRING), empty)?
     { let (m, t) = ic in
-        { pprov_max   = m;
-          pprov_time  = t;
-          pprov_names = pl; } }
+        { pprov_max       = m;
+          pprov_timeout   = t;
+          pprov_cpufactor = None;
+          pprov_names     = pl; } }
 
 gprover_info:
 | PROVER x=prover_info
     { x }
 
 | TIMEOUT t=uint
-    { { pprov_max = None; pprov_time = Some t; pprov_names = None } }
+    { { empty_pprover with pprov_timeout = Some t; } }
+
+| TIMEOUT STAR t=uint
+    { { empty_pprover with pprov_cpufactor = Some t; } }
 
 addrw:
 | HINT REWRITE p=lqident COLON l=lqident* {p,l}

@@ -313,6 +313,20 @@ let maybe_add_to_section scope item =
 module Prover = struct
   exception Unknown_prover of string
 
+  type options = {
+    po_timeout   : int option;
+    po_cpufactor : int option;
+    po_nprovers  : int option;
+    po_provers   : string list option;
+  }
+
+  let empty_options = {
+    po_timeout   = None;
+    po_cpufactor = None;
+    po_nprovers  = None;
+    po_provers   = None;
+  }
+
   let pp_error fmt exn =
     match exn with
     | Unknown_prover s ->
@@ -331,34 +345,37 @@ module Prover = struct
     let pi = { pi with EcProvers.pr_wrapper = wrapper } in
       { scope with sc_options = Prover_info.set scope.sc_options pi; }
 
-  let mk_prover_info scope maxprocs time ns =
-    let dft      = Prover_info.get scope.sc_options in
-    let time     = max 0 (odfl dft.EcProvers.pr_timelimit time) in
-    let provers  = odfl dft.EcProvers.pr_provers ns in
-    let maxprocs = odfl dft.EcProvers.pr_maxprocs maxprocs in
+  let mk_prover_info scope options =
+    let dft       = Prover_info.get scope.sc_options in
+    let timeout   = max 0 (odfl dft.EcProvers.pr_timelimit options.po_timeout) in
+    let cpufactor = max 0 (odfl dft.EcProvers.pr_cpufactor options.po_cpufactor) in
+    let maxprocs  = odfl dft.EcProvers.pr_maxprocs options.po_nprovers in
+    let provers   = odfl dft.EcProvers.pr_provers options.po_provers in
       { EcProvers.pr_maxprocs  = maxprocs;
         EcProvers.pr_provers   = provers;
-        EcProvers.pr_timelimit = time;
+        EcProvers.pr_timelimit = timeout;
+        EcProvers.pr_cpufactor = cpufactor;
         EcProvers.pr_wrapper   = dft.EcProvers.pr_wrapper; }
 
-  let set_prover_info scope max time ns =
-    let pi = mk_prover_info scope max time ns in
-      { scope with sc_options = Prover_info.set scope.sc_options pi }
+  let set_prover_info scope options =
+    let pi = mk_prover_info scope options in
+    { scope with sc_options = Prover_info.set scope.sc_options pi }
 
   let set_all scope =
     let provers =
       List.map
         (fun p -> p.EcProvers.pr_name)
         (EcProvers.known ~evicted:false) in
+    let options = { empty_options with po_provers = Some provers; } in
+    set_prover_info scope options
 
-    set_prover_info scope None None (Some provers)
-
-  let set_default scope ~timeout ~nprovers provers =
+  let set_default scope options =
     let provers =
-      match provers with
+      match options.po_provers with
       | None ->
          let provers = EcProvers.dft_prover_names in
-           List.filter EcProvers.is_prover_known provers
+         List.filter EcProvers.is_prover_known provers
+
       | Some provers ->
           List.iter
             (fun name ->
@@ -366,21 +383,29 @@ module Prover = struct
                 raise (Unknown_prover name)) provers;
           provers
     in
-      set_prover_info scope (Some nprovers) (Some timeout) (Some provers)
+
+    let options = { options with po_provers = Some provers } in
+    set_prover_info scope options
 
   let process scope pi =
-    let max  = pi.pprov_max in
-    let time = pi.pprov_time in
-    let ns   = pi.pprov_names in
-    let ns   = ns |> omap (List.map check_prover_name) in
-      set_prover_info scope max time ns
+    let options = {
+      po_timeout   = pi.pprov_timeout;
+      po_cpufactor = pi.pprov_cpufactor;
+      po_nprovers  = pi.pprov_max;
+      po_provers   = pi.pprov_names |> omap (List.map check_prover_name);
+    }
+
+    in set_prover_info scope options
 
   let mk_prover_info scope pi =
-    let max  = pi.pprov_max in
-    let time = pi.pprov_time in
-    let ns   = pi.pprov_names in
-    let ns   = ns |> omap (List.map check_prover_name) in
-      mk_prover_info scope max time ns
+    let options = {
+      po_timeout   = pi.pprov_timeout;
+      po_cpufactor = pi.pprov_cpufactor;
+      po_nprovers  = pi.pprov_max;
+      po_provers   = pi.pprov_names |> omap (List.map check_prover_name);
+    }
+
+    in mk_prover_info scope options
 
   let full_check scope =
     { scope with sc_options = Check_mode.full_check scope.sc_options }
@@ -1151,9 +1176,9 @@ module Ty = struct
   open EcDecl
   open EcTyping
 
-  module TT = EcTyping
-
-  type tydname = (ptyparams * psymbol) located
+  module TT  = EcTyping
+  module ELI = EcInductive
+  module EHI = EcHiInductive
 
   (* ------------------------------------------------------------------ *)
   let check_name_available scope x =
@@ -1501,197 +1526,48 @@ module Ty = struct
         failwith "unsupported"          (* FIXME *)
 
   (* ------------------------------------------------------------------ *)
-  let add_datatype (scope : scope) (tydname : tydname) dt =
-    let { pl_loc = loc; pl_desc = (tyvars, name); } = tydname in
+  let add_datatype (scope : scope) (tydname : ptydname) dt =
+    let name = snd (unloc tydname) in
 
     check_name_available scope name;
 
-    (* Check type-parameters / env0 is the env. augmented with an
-     * abstract type representing the currently processed datatype. *)
-    let ue    = TT.transtyvars scope.sc_env (loc, Some tyvars) in
-    let tpath = EcPath.pqname (path scope) (unloc name) in
-    let env0  =
-      let myself = {
-        tyd_params = EcUnify.UniEnv.tparams ue;
-        tyd_type   = `Abstract Sp.empty;
-      } in
-        EcEnv.Ty.bind (unloc name) myself scope.sc_env
-    in
+    let datatype = EHI.trans_datatype (env scope) tydname dt in
+    let ctors    = datatype.ELI.dt_ctors in
 
-    (* Check for duplicated constructor names *)
-    Msym.odup unloc (List.map fst dt)
-      |> oiter (fun (x, y) -> hierror ~loc:y.pl_loc
-                  "duplicated constructor name: `%s'" x.pl_desc);
-
-    (* Type-check constructor types *)
-    let ctors =
-      let for1 (cname, cty) =
-        let ue  = EcUnify.UniEnv.copy ue in
-        let cty = cty |> List.map (TT.transty TT.tp_tydecl env0 ue) in
-          (unloc cname, cty)
-      in
-        dt |> List.map for1
-    in
-
-    let tparams = EcUnify.UniEnv.tparams ue in
-
-    (* Check for the positivity condition / emptyness *)
-    let (schelim, schcase) =
-      let module E = struct exception Fail end in
-
-      let rec scheme1 p (pred, fac) ty =
-        let ty = EcEnv.Ty.hnorm ty env0 in
-          match ty.ty_node with
-          | Tglob   _ -> assert false
-          | Tunivar _ -> assert false
-          | Tvar    _ -> None
-
-          | Ttuple tys -> begin
-              let xs  = List.map (fun xty -> (fresh_id_of_ty xty, xty)) tys in
-              let sc1 = fun (x, xty) -> scheme1 p (pred, EcFol.f_local x xty) xty in
-                match List.pmap sc1 xs with
-                | []  -> None
-                | scs -> Some (EcFol.f_let (LTuple xs) fac (EcFol.f_ands scs))
-          end
-
-          | Tconstr (p', ts)  ->
-              if List.exists (occurs p) ts then raise E.Fail;
-              if not (EcPath.p_equal p p') then None else
-                Some (EcFol.f_app pred [fac] tbool)
-
-          | Tfun (ty1, ty2) ->
-              if occurs p ty1 then raise E.Fail;
-              let x = fresh_id_of_ty ty1 in
-                scheme1 p (pred, EcFol.f_app fac [EcFol.f_local x ty1] ty2) ty2
-                  |> omap (EcFol.f_forall [x, EcFol.GTty ty1])
-
-      and schemec mode (targs, p) pred (ctor, tys) =
-        let indty = tconstr p (List.map tvar targs) in
-        let ctor  = EcPath.pqname (path scope) ctor in
-        let ctor  = EcFol.f_op ctor (List.map tvar targs) indty in
-        let xs    = List.map (fun xty -> (fresh_id_of_ty xty, xty)) tys in
-        let cargs = List.map (fun (x, xty) -> EcFol.f_local x xty) xs in
-        let form  = EcFol.f_app pred [EcFol.f_app ctor cargs indty] tbool in
-        let form  =
-          match mode with
-          | `Case -> form
-
-          | `Elim ->
-              let sc1 = fun (x, xty) -> scheme1 p (pred, EcFol.f_local x xty) xty in
-              let scs = List.pmap sc1 xs in
-                (EcFol.f_imps scs form)
-        in
-
-        let form  =
-          let bds = List.map (fun (x, xty) -> (x, EcFol.GTty xty)) xs in
-            EcFol.f_forall bds form
-
-        in
-          form
-
-      and scheme mode (targs, p) ctors =
-        let indty  = tconstr p (List.map tvar targs) in
-        let indx   = fresh_id_of_ty indty in
-        let indfm  = EcFol.f_local indx indty in
-        let predty = tfun indty tbool in
-        let predx  = EcIdent.create "P" in
-        let pred   = EcFol.f_local predx predty in
-        let scs    = List.map (schemec mode (targs, p) pred) ctors in
-        let form   = EcFol.f_app pred [indfm] tbool in
-        let form   = EcFol.f_forall [indx, EcFol.GTty indty] form in
-        let form   = EcFol.f_imps scs form in
-        let form   = EcFol.f_forall [predx, EcFol.GTty predty] form in
-          form
-
-      and occurs p t =
-        let t = EcEnv.Ty.hnorm t env0 in
-          match t.ty_node with
-          | Tconstr (p', _) when EcPath.p_equal p p' -> true
-          | _ -> EcTypes.ty_sub_exists (occurs p) t
-
-      in
-        let (schelim, schcase) =
-          try
-            let schelim = scheme `Elim (List.map fst tparams, tpath) ctors in
-            let schcase = scheme `Case (List.map fst tparams, tpath) ctors in
-              (schelim, schcase)
-
-          with E.Fail ->
-            hierror ~loc "the datatype does not respect the positivity condition"
-        in
-          if List.for_all (fun (_, cty) -> List.exists (occurs tpath) cty) ctors then
-            hierror ~loc "this datatype is empty";
-          (schelim, schcase)
+    (* Generate schemes *)
+    let (indsc, casesc) =
+      try
+        let indsc    = ELI.indsc_of_datatype `Elim datatype in
+        let casesc   = ELI.indsc_of_datatype `Case datatype in
+        (indsc, casesc)
+      with ELI.NonPositive ->
+        EHI.dterror tydname.pl_loc (env scope) EHI.DTE_NonPositive
     in
 
     (* Add final datatype to environment *)
     let tydecl = {
-      tyd_params = tparams;
-      tyd_type   = `Datatype { tydt_ctors   = ctors;
-                               tydt_schcase = schcase;
-                               tydt_schelim = schelim; };
-    } in
-      bind scope (unloc name, tydecl)
+      tyd_params = datatype.ELI.dt_tparams;
+      tyd_type   = `Datatype { tydt_ctors   = ctors ;
+                               tydt_schcase = casesc;
+                               tydt_schelim = indsc ; }; }
+
+    in bind scope (unloc name, tydecl)
 
   (* ------------------------------------------------------------------ *)
-  let add_record (scope : scope) (tydname : tydname) rt =
-    let { pl_loc = loc; pl_desc = (tyvars, name); } = tydname in
+  let add_record (scope : scope) (tydname : ptydname) rt =
+    let name = snd (unloc tydname) in
 
     check_name_available scope name;
 
-    (* Check type-parameters *)
-    let ue    = TT.transtyvars scope.sc_env (loc, Some tyvars) in
-    let tpath = EcPath.pqname (path scope) (unloc name) in
-
-    (* Check for duplicated field names *)
-    Msym.odup unloc (List.map fst rt)
-      |> oiter (fun (x, y) -> hierror ~loc:y.pl_loc
-                  "duplicated field name: `%s'" x.pl_desc);
-
-    (* Type-check field types *)
-    let fields =
-      let for1 (fname, fty) =
-        let fty = TT.transty TT.tp_tydecl (env scope) ue fty in
-          (unloc fname, fty)
-      in
-        rt |> List.map for1
-    in
-
-    let tparams = EcUnify.UniEnv.tparams ue in
-
-    (* Generate induction scheme *)
-    let scheme =
-      let targs  = List.map (tvar |- fst) tparams in
-      let recty  = tconstr tpath targs in
-      let recx   = fresh_id_of_ty recty in
-      let recfm  = EcFol.f_local recx recty in
-      let predty = tfun recty tbool in
-      let predx  = EcIdent.create "P" in
-      let pred   = EcFol.f_local predx predty in
-      let ctor   = EcPath.pqoname
-                     (EcPath.prefix tpath)
-                     (Printf.sprintf "mk_%s" (unloc name)) in
-      let ctor   = EcFol.f_op ctor targs (toarrow (List.map snd fields) recty) in
-      let prem   =
-        let ids  = List.map (fun (_, fty) -> (fresh_id_of_ty fty, fty)) fields in
-        let vars = List.map (fun (x, xty) -> EcFol.f_local x xty) ids in
-        let bds  = List.map (fun (x, xty) -> (x, EcFol.GTty xty)) ids in
-        let recv = EcFol.f_app ctor vars recty in
-          EcFol.f_forall bds (EcFol.f_app pred [recv] tbool) in
-      let form   = EcFol.f_app pred [recfm] tbool in
-      let form   = EcFol.f_forall [recx, EcFol.GTty recty] form in
-      let form   = EcFol.f_imp prem form in
-      let form   = EcFol.f_forall [predx, EcFol.GTty predty] form in
-        form
-    in
+    let record  = EHI.trans_record (env scope) tydname rt in
+    let scheme  = ELI.indsc_of_record record in
 
     (* Add final record to environment *)
-    let tparams = EcUnify.UniEnv.tparams ue in
     let tydecl  = {
-      tyd_params = tparams;
-      tyd_type   = `Record (scheme, fields);
-    } in
-      bind scope (unloc name, tydecl)
+      tyd_params = record.ELI.rc_tparams;
+      tyd_type   = `Record (scheme, record.ELI.rc_fields); }
+
+    in bind scope (unloc name, tydecl)
 end
 
 (* -------------------------------------------------------------------- *)
