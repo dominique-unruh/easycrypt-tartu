@@ -244,13 +244,13 @@ let process_pr fmt scope p =
   
       Format.fprintf fmt "Prog. variables [# = %d]:@."
         (Mx.cardinal us.EcEnv.us_pv);
-      Mx.iter (fun xp _ ->
+      List.iter (fun (xp,_) ->
         let pv = EcTypes.pv_glob xp in
         let ty = EcEnv.Var.by_xpath xp env in
         Format.fprintf fmt "  @[%a : %a@]@."
           (EcPrinting.pp_pv ppe) pv
           (EcPrinting.pp_type ppe) ty.EcEnv.vb_type)
-        us.EcEnv.us_pv
+        (List.rev (Mx.bindings us.EcEnv.us_pv))
   end
 
   | Pr_goal n -> begin
@@ -357,6 +357,13 @@ and process_predicate (scope : EcScope.scope) (p : ppredicate located) =
   let scope = EcScope.Pred.add scope p in
     EcScope.notify scope `Info "added predicate: `%s'" (unloc p.pl_desc.pp_name);
     scope
+
+(* -------------------------------------------------------------------- *)
+and process_choice (scope : EcScope.scope) (c : pchoice located) =
+  EcScope.check_state `InTop "choice" scope;
+  let scope = EcScope.Op.add_choiceop scope c in
+    EcScope.notify scope `Info "added choice operator: `%s'" (unloc c.pl_desc.pc_name);
+    scope                                 (* FIXME *)
 
 (* -------------------------------------------------------------------- *)
 and process_axiom (scope : EcScope.scope) (ax : paxiom located) =
@@ -523,6 +530,7 @@ and process (ld : EcLoader.ecloader) (scope : EcScope.scope) g =
       | Ginterface   i    -> `Fct   (fun scope -> process_interface  scope  i)
       | Goperator    o    -> `Fct   (fun scope -> process_operator   scope  (mk_loc loc o))
       | Gpredicate   p    -> `Fct   (fun scope -> process_predicate  scope  (mk_loc loc p))
+      | Gchoice      c    -> `Fct   (fun scope -> process_choice     scope  (mk_loc loc c))
       | Gaxiom       a    -> `Fct   (fun scope -> process_axiom      scope  (mk_loc loc a))
       | GthOpen      name -> `Fct   (fun scope -> process_th_open    scope  name.pl_desc)
       | GthClose     name -> `Fct   (fun scope -> process_th_close   scope  name.pl_desc)
