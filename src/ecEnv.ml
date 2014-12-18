@@ -470,7 +470,7 @@ module MC = struct
     | IPPath  p           -> _params_of_path p env
     | IPIdent (_, None)   -> []
     | IPIdent (m, Some p) ->
-        assert (is_some (EcPath.prefix p));
+        assert (is_none (EcPath.prefix p));
         let mc = Mip.find_opt (IPIdent (m, None)) env.env_comps in
           [(oget mc).mc_parameters]
 
@@ -520,7 +520,7 @@ module MC = struct
     match qn with
     | [] -> Some env.env_current
 
-    | x :: qn when x = EcCoreLib.i_top && is_some env.env_top ->
+    | x :: qn when x = EcCoreLib.i_self && is_some env.env_top ->
         let p = IPPath (path_of_qn (oget env.env_top) qn) in
         Mip.find_opt p env.env_comps
 
