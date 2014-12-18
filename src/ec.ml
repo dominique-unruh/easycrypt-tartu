@@ -86,6 +86,11 @@ let print_config config =
        (Str.regexp (Str.quote psep))
        (try Sys.getenv "PATH" with Not_found -> ""))
 
+let _ = Sys.catch_break true;;
+(*let _ = Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
+  Printf.printf "Got Ctrl-C"));;*)
+    
+
 (* -------------------------------------------------------------------- *)
 let _ =
   let myname  = Filename.basename Sys.executable_name
