@@ -196,10 +196,16 @@ and pucflags = {
 }
 
 (* -------------------------------------------------------------------- *)
+type prelude = {
+  pr_env      : EcEnv.env;
+  pr_required : symbol list;
+}
+
 type scope = {
   sc_name     : symbol;
   sc_env      : EcEnv.env;
   sc_top      : scope option;
+  sc_prelude  : prelude option;
   sc_loaded   : (EcEnv.ctheory_w3 * symbol list) Msym.t;
   sc_required : symbol list;
   sc_pr_uc    : proof_uc option;
@@ -213,6 +219,7 @@ let empty (gstate : EcGState.gstate) =
   { sc_name       = EcPath.basename (EcEnv.root env);
     sc_env        = env;
     sc_top        = None;
+    sc_prelude    = None;
     sc_loaded     = Msym.empty;
     sc_required   = [];
     sc_pr_uc      = None;
@@ -238,6 +245,16 @@ let env (scope : scope) =
 (* -------------------------------------------------------------------- *)
 let attop (scope : scope) =
   scope.sc_top = None
+
+(* -------------------------------------------------------------------- *)
+let prelude_of_scope (scope : scope) =
+  { pr_env      = scope.sc_env;
+    pr_required = scope.sc_required; }
+
+(* -------------------------------------------------------------------- *)
+let freeze (scope : scope) =
+  assert (is_none scope.sc_prelude && attop scope);
+  { scope with sc_prelude = Some (prelude_of_scope scope); }
 
 (* -------------------------------------------------------------------- *)
 let goal (scope : scope) =
@@ -278,14 +295,24 @@ end
 
 (* -------------------------------------------------------------------- *)
 let for_loading (scope : scope) =
-  let gstate = EcEnv.gstate scope.sc_env in
-  let gstate = EcGState.copy gstate in
+  let pr =
+    match scope.sc_prelude with
+    | Some pr -> pr
+    | None    ->
+        let gs  = (EcEnv.gstate scope.sc_env) in
+        let env = EcEnv.initial (EcGState.copy gs) in
+        { pr_env = env; pr_required = []; }
+  in
 
-  EcGState.set_loglevel `Warning gstate;
-
-  { (empty gstate) with
-      sc_loaded  = scope.sc_loaded;
-      sc_options = GenOptions.for_loading scope.sc_options; }
+  { sc_name       = EcPath.basename (EcEnv.root pr.pr_env);
+    sc_env        = pr.pr_env;
+    sc_top        = None;
+    sc_prelude    = scope.sc_prelude;
+    sc_loaded     = scope.sc_loaded;
+    sc_required   = pr.pr_required;
+    sc_pr_uc      = None;
+    sc_options    = GenOptions.for_loading scope.sc_options;
+    sc_section    = EcSection.initial; }
 
 (* -------------------------------------------------------------------- *)
 let subscope (scope : scope) (name : symbol) =
@@ -294,12 +321,12 @@ let subscope (scope : scope) (name : symbol) =
   { sc_name       = name;
     sc_env        = env;
     sc_top        = Some scope;
+    sc_prelude    = scope.sc_prelude;
     sc_loaded     = scope.sc_loaded;
     sc_required   = scope.sc_required;
     sc_pr_uc      = None;
     sc_options    = GenOptions.for_subscope scope.sc_options;
-    sc_section    = scope.sc_section;
-  }
+    sc_section    = scope.sc_section; }
 
 (* -------------------------------------------------------------------- *)
 let maybe_add_to_section scope item =
@@ -1548,15 +1575,13 @@ module Theory = struct
 
       | None ->
           let imported = enter (for_loading scope) name in
+          let imported = { imported with sc_env = EcEnv.astop imported.sc_env } in
           let thname   = imported.sc_name in
           let imported = loader imported in
           check_end_required imported thname;
           let cthr, _, name, imported = exit_r imported in
-          let scope =
-            { scope with
-                sc_loaded = Msym.add name cthr imported.sc_loaded; }
-          in
-            require_loaded name scope
+          let scope = { scope with sc_loaded = Msym.add name cthr imported.sc_loaded; } in
+          require_loaded name scope
 
   (* ------------------------------------------------------------------ *)
   let import_w3 scope dir file renaming =

@@ -33,9 +33,11 @@ val initial : EcGState.gstate -> env
 val root    : env -> EcPath.path
 val mroot   : env -> EcPath.mpath
 val xroot   : env -> EcPath.xpath option
+val astop   : env -> env
 
 (* -------------------------------------------------------------------- *)
 val gstate : env -> EcGState.gstate
+val copy   : env -> env
 
 (* -------------------------------------------------------------------- *)
 val notify : env -> EcGState.loglevel -> ('a, Format.formatter, unit, unit) format4 -> 'a
