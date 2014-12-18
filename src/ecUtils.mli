@@ -7,7 +7,6 @@
 exception Unexpected
 
 val unexpected : unit -> 'a
-val checkpoint : unit -> unit
 
 (* -------------------------------------------------------------------- *)
 type 'data cb = Cb : 'a * ('data -> 'a -> unit) -> 'data cb

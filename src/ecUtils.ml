@@ -8,8 +8,6 @@ exception Unexpected
 
 let unexpected () = raise Unexpected
 
-let checkpoint () = Printf.printf "."
-
 (* -------------------------------------------------------------------- *)
 type 'data cb = Cb : 'a * ('data -> 'a -> unit) -> 'data cb
 
