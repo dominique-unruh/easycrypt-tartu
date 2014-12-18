@@ -272,7 +272,6 @@ let t_rewrite_prept info pt tc =
 
 (* -------------------------------------------------------------------- *)
 let process_rewrite1_core (s, o) pt tc =
-  EcUtils.checkpoint();
   try
     LowRewrite.t_rewrite_r (s, o) pt tc
   with
