@@ -525,6 +525,7 @@ module MC = struct
         Mip.find_opt p env.env_comps
 
     | x :: qn ->
+        let x = if x = EcCoreLib.i_self then EcCoreLib.i_top else x in
         let p =
           (MMsym.last x env.env_current.mc_components) |>
             obind
@@ -649,6 +650,11 @@ module MC = struct
     match lookup (fun mc -> mc.mc_axioms) qnx env with
     | None -> lookup_error (`QSymbol qnx)
     | Some (p, (args, obj)) -> (_downpath_for_axiom env p args, obj)
+
+  let lookup_axioms qnx env =
+    List.map
+      (fun (p, (args, obj)) -> (_downpath_for_axiom env p args, obj))
+      (lookup_all (fun mc -> mc.mc_axioms) qnx env)
 
   let _up_axiom candup mc x obj =
     if not candup && MMsym.last x mc.mc_axioms <> None then
@@ -2512,6 +2518,11 @@ module Ax = struct
   let lookup qname (env : env) =
     MC.lookup_axiom qname env
 
+  let all filter (qname : qsymbol) (env : env) =
+    let axs = MC.lookup_axioms qname env in
+    List.filter (fun (_, ax) -> filter ax) axs
+
+    
   let lookup_opt name env =
     try_lf (fun () -> lookup name env)
 
