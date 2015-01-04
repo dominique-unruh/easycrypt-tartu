@@ -1,5 +1,5 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2014 - IMDEA Software Institute and INRIA
+ * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
  * Distributed under the terms of the CeCILL-C license
  * -------------------------------------------------------------------- *)
 
@@ -873,8 +873,6 @@ module Op = struct
 
       | Some (`Exists (x, t, f)) ->
           ([], (x, t, f)) in
-
-    let destruct fp = fst_map List.rev (destruct fp) in
 
     let (args, (x, t, body)) = destruct (oget ax.ax_spec) in
 

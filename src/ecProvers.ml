@@ -1,5 +1,5 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2014 - IMDEA Software Institute and INRIA
+ * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
  * Distributed under the terms of the CeCILL-C license
  * -------------------------------------------------------------------- *)
 
@@ -233,7 +233,7 @@ let is_prover_known name =
 
 (* -------------------------------------------------------------------- *)
 let get_w3_th dirname name =
-  Env.find_theory (Config.w3_env ()) dirname name
+  Env.read_theory (Config.w3_env ()) dirname name
 
 (* -------------------------------------------------------------------- *)
 type prover_infos = {
