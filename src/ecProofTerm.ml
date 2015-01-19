@@ -91,7 +91,7 @@ type cptenv = CPTEnv of f_subst
 (* -------------------------------------------------------------------- *)
 let concretize_env pe =
   let tysubst  = { ty_subst_id with ts_u = EcUnify.UniEnv.close pe.pte_ue } in
-  let ftysubst = Fsubst.f_subst_init false Mid.empty tysubst EcPath.Mp.empty in
+  let ftysubst = Fsubst.f_subst_init false Mid.empty tysubst EcPath.Mp.empty EcPath.Mp.empty in
   let subst    = ftysubst in
 
   CPTEnv (
@@ -424,7 +424,11 @@ and trans_pterm_arg_mem pe ?name { pl_desc = arg } =
   let dfl () = Printf.sprintf "&m%d" (EcUid.unique ()) in
 
   match arg with
-  | EA_mod _ | EA_form _ -> tc_pterm_apperror pe.pte_pe `MemoryWanted
+  | EA_form { pl_loc = lc; pl_desc = (PFmem m) } ->
+      trans_pterm_arg_mem pe ?name (mk_loc lc (EA_mem m))
+
+  | EA_mod  _ -> tc_pterm_apperror pe.pte_pe `MemoryWanted
+  | EA_form _ -> tc_pterm_apperror pe.pte_pe `MemoryWanted
 
   | EA_none ->
       let x = EcIdent.create (ofdfl dfl name) in

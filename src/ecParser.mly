@@ -749,6 +749,9 @@ sform_u(P):
 | x=qoident ti=tvars_app?
    { PFident (x, ti) }
 
+| x=mident
+   { PFmem x }
+
 | se=sform_r(P) op=loc(FROM_INT)
    { let id = PFident(mk_loc op.pl_loc EcCoreLib.s_real_of_int, None) in
      PFapp (mk_loc op.pl_loc id, [se]) }
@@ -1611,9 +1614,6 @@ fpattern_arg:
 
 | f=sform
     { EA_form f }
-
-| s=mident
-    { EA_mem s }
 
 fpattern(F):
 | hd=fpattern_head(F)
@@ -2547,21 +2547,21 @@ clone_override:
      } in
        (x, PTHO_Op (ov, unloc mode)) }
 
-| PRED x=qoident tyvars=bracket(tident*)? p=ptybindings EQ f=form
+| PRED x=qoident tyvars=bracket(tident*)? p=ptybindings mode=loc(opclmode) f=form
    { let ov = {
        prov_tyvars = tyvars;
        prov_args   = p;
        prov_body   = f;
      } in
-       (x, PTHO_Pred ov) }
+       (x, PTHO_Pred (ov, unloc mode)) }
 
-| PRED x=qoident tyvars=bracket(tident*)? EQ f=form
+| PRED x=qoident tyvars=bracket(tident*)? mode=loc(opclmode) f=form
    { let ov = {
        prov_tyvars = tyvars;
        prov_args   = [];
        prov_body   = f;
      } in
-       (x, PTHO_Pred ov) }
+       (x, PTHO_Pred (ov, unloc mode)) }
 
 | THEORY x=uqident LARROW y=uqident
    { (x, PTHO_Theory y) }
