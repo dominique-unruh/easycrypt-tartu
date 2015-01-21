@@ -201,12 +201,14 @@ type prelude = {
   pr_required : symbol list;
 }
 
+type thloaded = (EcEnv.ctheory_w3 * EcTheory.thmode)
+
 type scope = {
-  sc_name     : symbol;
+  sc_name     : (symbol * EcTheory.thmode);
   sc_env      : EcEnv.env;
   sc_top      : scope option;
   sc_prelude  : prelude option;
-  sc_loaded   : (EcEnv.ctheory_w3 * symbol list) Msym.t;
+  sc_loaded   : (thloaded * symbol list) Msym.t;
   sc_required : symbol list;
   sc_pr_uc    : proof_uc option;
   sc_options  : GenOptions.options;
@@ -216,7 +218,7 @@ type scope = {
 (* -------------------------------------------------------------------- *)
 let empty (gstate : EcGState.gstate) =
   let env = EcEnv.initial gstate in
-  { sc_name       = EcPath.basename (EcEnv.root env);
+  { sc_name       = (EcPath.basename (EcEnv.root env), `Concrete);
     sc_env        = env;
     sc_top        = None;
     sc_prelude    = None;
@@ -304,7 +306,7 @@ let for_loading (scope : scope) =
         { pr_env = env; pr_required = []; }
   in
 
-  { sc_name       = EcPath.basename (EcEnv.root pr.pr_env);
+  { sc_name       = (EcPath.basename (EcEnv.root pr.pr_env), `Concrete);
     sc_env        = pr.pr_env;
     sc_top        = None;
     sc_prelude    = scope.sc_prelude;
@@ -315,10 +317,10 @@ let for_loading (scope : scope) =
     sc_section    = EcSection.initial; }
 
 (* -------------------------------------------------------------------- *)
-let subscope (scope : scope) (name : symbol) =
+let subscope (scope : scope) (mode : EcTheory.thmode) (name : symbol) =
   let env = EcEnv.Theory.enter name scope.sc_env in
 
-  { sc_name       = name;
+  { sc_name       = (name, mode);
     sc_env        = env;
     sc_top        = Some scope;
     sc_prelude    = scope.sc_prelude;
@@ -1434,17 +1436,18 @@ end
 
 (* -------------------------------------------------------------------- *)
 module Theory = struct
+  open EcTheory
+
   exception TopScope
 
   (* ------------------------------------------------------------------ *)
-  let bind (scope : scope) ((x, cth) : _ * EcEnv.ctheory_w3) =
+  let bind (scope : scope) (x, (cth, mode)) =
     assert (scope.sc_pr_uc = None);
     let scope =
-      { scope with
-          sc_env = EcEnv.Theory.bind x cth scope.sc_env; }
+      { scope with sc_env = EcEnv.Theory.bind ~mode x cth scope.sc_env; }
     in
       maybe_add_to_section scope
-        (EcTheory.CTh_theory (x, EcEnv.ctheory_of_ctheory_w3 cth))
+        (EcTheory.CTh_theory (x, (EcEnv.ctheory_of_ctheory_w3 cth, mode)))
 
   (* ------------------------------------------------------------------ *)
   let required (scope : scope) (name : symbol) =
@@ -1452,9 +1455,9 @@ module Theory = struct
     List.exists (fun x -> x = name) scope.sc_required
 
   (* ------------------------------------------------------------------ *)
-  let enter (scope : scope) (name : symbol) =
+  let enter (scope : scope) (mode : thmode) (name : symbol) =
     assert (scope.sc_pr_uc = None);
-    subscope scope name
+    subscope scope mode name
 
   (* ------------------------------------------------------------------ *)
   let rec require_loaded id scope =
@@ -1462,12 +1465,12 @@ module Theory = struct
       scope
     else
       match Msym.find_opt id scope.sc_loaded with
-      | Some (rth, ids) ->
+      | Some ((rth, mode), ids) ->
           let scope = List.fold_right require_loaded ids scope in
-          let env   = EcEnv.Theory.require id rth scope.sc_env in
+          let env   = EcEnv.Theory.require ~mode id rth scope.sc_env in
             { scope with
-              sc_env = env;
-              sc_required = id :: scope.sc_required; }
+                sc_env      = env;
+                sc_required = id :: scope.sc_required; }
 
       | None -> assert false
 
@@ -1495,7 +1498,7 @@ module Theory = struct
   let exit (scope : scope) =
     let rec add_restr1 section where env item : EcEnv.env =
       match item with 
-      | EcTheory.CTh_theory (name, th) ->
+      | EcTheory.CTh_theory (name, (th, _)) ->
           add_restr section (EcPath.pqname where name) th env
   
       | EcTheory.CTh_module me ->
@@ -1520,9 +1523,9 @@ module Theory = struct
     in
 
     assert (scope.sc_pr_uc = None);
-    let ((cth, required), section, name, scope) = exit_r scope in
+    let ((cth, required), section, (name, mode), scope) = exit_r scope in
     let scope = List.fold_right require_loaded required scope in
-    let scope = bind scope (name, cth) in
+    let scope = bind scope (name, (cth, mode)) in
     let scope = { scope with sc_env =
         add_restr section
           (EcPath.pqname (path scope) name)
@@ -1533,36 +1536,54 @@ module Theory = struct
   (* ------------------------------------------------------------------ *)
   let import (scope : scope) (name : qsymbol) =
     assert (scope.sc_pr_uc = None);
-    let path = fst (EcEnv.Theory.lookup name scope.sc_env) in
-    { scope with
-        sc_env = EcEnv.Theory.import path scope.sc_env }
+
+    match EcEnv.Theory.lookup_opt ~mode:`All name scope.sc_env with
+    | None ->
+        hierror
+          "cannot import the non-existent theory `%s'"
+          (string_of_qsymbol name)
+
+    | Some (_, (_, `Abstract)) ->
+        hierror "cannot import an abstract theory"
+
+    | Some (path, (_, `Concrete)) ->
+        { scope with sc_env = EcEnv.Theory.import path scope.sc_env }
 
   (* ------------------------------------------------------------------ *)
   let export (scope : scope) (name : qsymbol) =
     assert (scope.sc_pr_uc = None);
-    let path = fst (EcEnv.Theory.lookup name scope.sc_env) in
-    { scope with
-        sc_env = EcEnv.Theory.export path scope.sc_env }
+
+    match EcEnv.Theory.lookup_opt ~mode:`All name scope.sc_env with
+    | None ->
+        hierror
+          "cannot export the non-existent theory `%s'"
+          (string_of_qsymbol name)
+
+    | Some (_, (_, `Abstract)) ->
+        hierror "cannot export an abstract theory"
+
+    | Some (path, (_, `Concrete)) ->
+        { scope with sc_env = EcEnv.Theory.export path scope.sc_env }
 
   (* ------------------------------------------------------------------ *)
   let check_end_required scope thname =
-    if scope.sc_name <> thname then
+    if fst scope.sc_name <> thname then
       begin
         let msg =
           Printf.sprintf
             "end-of-file while processing external theory %s %s"
-            scope.sc_name thname in
+            (fst scope.sc_name) thname in
         failwith msg
       end;
     if scope.sc_pr_uc <> None then
       let msg =
         Printf.sprintf
-          "end-of-file while processing proof %s" scope.sc_name
+          "end-of-file while processing proof %s" (fst scope.sc_name)
       in
         failwith msg
 
   (* -------------------------------------------------------------------- *)
-  let require (scope : scope) (name : symbol) loader =
+  let require (scope : scope) ((name, mode) : symbol * thmode) loader =
     assert (scope.sc_pr_uc = None);
 
     if required scope name then
@@ -1572,13 +1593,17 @@ module Theory = struct
       | Some _ -> require_loaded name scope
 
       | None ->
-          let imported = enter (for_loading scope) name in
+          let imported = enter (for_loading scope) mode name in
           let imported = { imported with sc_env = EcEnv.astop imported.sc_env } in
-          let thname   = imported.sc_name in
+          let thname   = fst imported.sc_name in
           let imported = loader imported in
+
           check_end_required imported thname;
-          let cthr, _, name, imported = exit_r imported in
-          let scope = { scope with sc_loaded = Msym.add name cthr imported.sc_loaded; } in
+
+          let (cth, rqs), _, (name, _), imported = exit_r imported in
+          let scope = { scope with sc_loaded =
+              Msym.add name ((cth, mode), rqs) imported.sc_loaded; } in
+
           require_loaded name scope
 
   (* ------------------------------------------------------------------ *)
@@ -1659,8 +1684,8 @@ module Section = struct
           | T.CTh_export p ->
               { scope with sc_env = EcEnv.Theory.export p scope.sc_env }
 
-          | T.CTh_theory (x, th) ->
-              let scope = Theory.enter scope x in
+          | T.CTh_theory (x, (th, thmode)) ->
+              let scope = Theory.enter scope thmode x in
               let scope = List.fold_left bind1 scope th.EcTheory.cth_struct in
               let _, scope = Theory.exit scope in
                 scope
@@ -1739,6 +1764,22 @@ module Cloning = struct
     with Incompatible -> false
 
   (* ------------------------------------------------------------------ *)
+  type options = {
+    clo_abstract : bool;
+  }
+
+  module Options = struct
+    let default = { clo_abstract = false; }
+
+    let merge1 opts (b, (x : theory_cloning_option)) =
+      match x with
+      | `Abstract -> { opts with clo_abstract = b; }
+
+    let merge opts (specs : theory_cloning_options) =
+      List.fold_left merge1 opts specs
+  end
+
+  (* ------------------------------------------------------------------ *)
   let clone (scope : scope) mode (thcl : theory_cloning) =
     let module C = EcThCloning in
 
@@ -1746,11 +1787,12 @@ module Cloning = struct
 
     if EcSection.in_section scope.sc_section then begin
       let oname = unloc thcl.pthc_base in
-      let oname = fst (EcEnv.Theory.lookup oname scope.sc_env) in
+      let oname = omap fst (EcEnv.Theory.lookup_opt oname scope.sc_env) in
       let tenv  = EcSection.topenv scope.sc_section in
 
-      if EcUtils.is_none (EcEnv.Theory.by_path_opt oname tenv) then
-        hierror "cannot clone a theory that has been defined in the active section"
+      oname |> oiter (fun oname -> 
+        if EcUtils.is_none (EcEnv.Theory.by_path_opt oname tenv) then
+          hierror "cannot clone a theory that has been defined in the active section")
     end else begin
       if thcl.pthc_local then
         hierror "cannot do a local clone outside of a section"
@@ -1758,6 +1800,7 @@ module Cloning = struct
 
     let (name, (opath, oth), ovrds) = C.clone scope.sc_env thcl in
 
+    let opts  = Options.merge Options.default thcl.pthc_opts in
     let cpath = EcEnv.root scope.sc_env in
     let npath = EcPath.pqname cpath name in
     let subst = EcSubst.add_path EcSubst.empty opath npath in
@@ -1808,8 +1851,7 @@ module Cloning = struct
   
             | Some { pl_desc = (opov, opmode); pl_loc = loc; } ->
                 let (reftyvars, refty) =
-                  let refop = EcEnv.Op.by_path (xpath x) scope.sc_env in
-                  let refop = EcSubst.subst_op subst refop in
+                  let refop = EcSubst.subst_op subst oopd in
                     (refop.op_tparams, refop.op_ty)
                 in
   
@@ -1859,8 +1901,7 @@ module Cloning = struct
   
             | Some { pl_desc = (prov, prmode); pl_loc = loc; } ->
                 let (reftyvars, refty) =
-                  let refpr = EcEnv.Op.by_path (xpath x) scope.sc_env in
-                  let refpr = EcSubst.subst_op subst refpr in
+                  let refpr = EcSubst.subst_op subst oopr in
                     (refpr.op_tparams, refpr.op_ty)
                 in
   
@@ -1948,11 +1989,11 @@ module Cloning = struct
             let me = EcSubst.subst_module subst me in
               (subst, ops, proofs, Mod.bind scope thcl.pthc_local me)
   
-        | CTh_theory (x, cth) -> begin
+        | CTh_theory (x, (cth, thmode)) -> begin
             let subovrds = Msym.find_opt x ovrds.evc_ths in
             let subovrds = EcUtils.odfl evc_empty subovrds in
             let (subst, ops, proofs, subscope) =
-              let subscope = Theory.enter scope x in
+              let subscope = Theory.enter scope thmode x in
               let (subst, ops, proofs, subscope) =
                 List.fold_left
                   (ovr1 (prefix @ [x]) subovrds)
@@ -2055,9 +2096,12 @@ module Cloning = struct
             (subst, ops, proofs, scope)
   
       in
-        let scope = Theory.enter scope name in
+        let mode  = if opts.clo_abstract then `Abstract else `Concrete in
+        let scope = Theory.enter scope mode name in
         let _, _, proofs, scope =
-          List.fold_left (ovr1 [] ovrds) (subst, Mp.empty, [], scope) oth.cth_struct
+          List.fold_left (ovr1 [] ovrds)
+            (subst, Mp.empty, [], scope)
+            (fst oth).cth_struct
         in
           (List.rev proofs, snd (Theory.exit scope))
     in

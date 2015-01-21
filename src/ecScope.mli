@@ -46,7 +46,7 @@ val empty  : EcGState.gstate -> scope
 val gstate : scope -> EcGState.gstate
 val freeze : scope -> scope
 val path   : scope -> EcPath.path
-val name   : scope -> symbol
+val name   : scope -> symbol * EcTheory.thmode
 val env    : scope -> EcEnv.env
 val attop  : scope -> bool
 val goal   : scope -> proof_auc option
@@ -108,11 +108,13 @@ end
 
 (* -------------------------------------------------------------------- *)
 module Theory : sig
+  open EcTheory
+
   exception TopScope
 
-  (* [enter scope name] start a theory in scope [scope] with
-   * name [name]. *)
-  val enter : scope -> symbol -> scope
+  (* [enter scope mode name] start a theory in scope [scope] with
+   * name [name] and mode (abstract/concrete) [mode]. *)
+  val enter : scope -> thmode -> symbol -> scope
 
   (* [exit scope] close and finalize the top-most theory and returns
    * its name. Raises [TopScope] if [scope] has not super scope. *)
@@ -132,7 +134,7 @@ module Theory : sig
    * loader [loader] in scope [scope]. [loader] is called on
    * the initial scope and is in charge of processing the required
    * theory. *)
-  val require : scope -> symbol -> (scope -> scope) -> scope
+  val require : scope -> (symbol * thmode) -> (scope -> scope) -> scope
 
   (* FIXME: DOC *)
   val import_w3 : scope -> string list -> string -> w3_renaming list -> scope
