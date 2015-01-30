@@ -386,7 +386,7 @@ let t_equivS_conseq_bd side pr po tc =
     | `Left  -> es.es_ml, es.es_sl, es.es_sr
     | `Right -> es.es_mr, es.es_sr, es.es_sl
   in
-  if not (List.isempty s'.s_node) then begin
+  if not (List.is_empty s'.s_node) then begin
     let side = side2str (negside side) in
     tc_error !!tc "%s statement should be empty" side
   end;
@@ -945,6 +945,7 @@ let process_conseq notmod (info1, info2, info3) tc =
 
 (* -------------------------------------------------------------------- *)
 let process_bd_equiv side (pr, po) tc =
-  let info = Some { fp_kind = FPCut ((Some pr, Some po),None); fp_args = [] } in
+  let info = FPCut ((Some pr, Some po), None) in
+  let info = Some { fp_head = info; fp_args = []; } in
   let info2, info3 = sideif side (info, None) (None, info) in
   process_conseq true (None, info2, info3) tc

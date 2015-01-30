@@ -506,7 +506,7 @@ let f_tuple args =
   | _   -> mk_form (Ftuple args) (ttuple (List.map f_ty args))
 
 let f_quant q b f =
-  if List.isempty b then f else
+  if List.is_empty b then f else
     let (q, b, f) =
       match f.f_node with
       | Fquant(q',b',f') when q = q' -> (q, b@b', f')
@@ -530,8 +530,8 @@ let f_forall_mems bds f =
   f_forall (List.map (fun (m, mt) -> (m, GTmem mt)) bds) f
 
 (* -------------------------------------------------------------------- *)
-let ty_fbool1 = toarrow (List.create 1 tbool) tbool
-let ty_fbool2 = toarrow (List.create 2 tbool) tbool
+let ty_fbool1 = toarrow (List.make 1 tbool) tbool
+let ty_fbool2 = toarrow (List.make 2 tbool) tbool
 
 let fop_not  = f_op EcCoreLib.CI_Bool.p_not  [] ty_fbool1
 let fop_and  = f_op EcCoreLib.CI_Bool.p_and  [] ty_fbool2
@@ -911,15 +911,14 @@ let form_forall g f =
   | FeagerF   eg  -> g eg.eg_pr   && g eg.eg_po
   | Fpr       pr  -> g pr.pr_args && g pr.pr_event
 
-let used_ops f = 
-  let ops = ref EcPath.Sp.empty in
-  let add p = ops := EcPath.Sp.add p !ops in
-  let rec aux f = 
+(* -------------------------------------------------------------------- *)
+let f_ops f =
+  let aout = ref EcPath.Sp.empty in
+  let rec doit f = 
     match f.f_node with
-    | Fop(p,_) -> add p
-    | _ -> f_iter aux f in
-  aux f;
-  !ops
+    | Fop (p, _) -> aout := Sp.add p !aout
+    | _ -> f_iter doit f
+  in doit f; !aout
 
 (* -------------------------------------------------------------------- *)
 exception DestrError of string
@@ -1453,8 +1452,8 @@ module Fsubst = struct
     let (sag, args, e) =
       match e.e_node with
       | Elam (largs, lbody) when args <> [] ->
-          let largs1, largs2 = List.take_n (List.length args  ) largs in
-          let  args1,  args2 = List.take_n (List.length largs1)  args in
+          let largs1, largs2 = List.takedrop (List.length args  ) largs in
+          let  args1,  args2 = List.takedrop (List.length largs1)  args in
             (Mid.of_list (List.combine (List.map fst largs1) args1),
              args2, e_lam largs2 lbody)
 
@@ -1480,8 +1479,8 @@ module Fsubst = struct
     let (sag, args, f) =
       match f.f_node with
       | Fquant (Llambda, largs, lbody) when args <> [] ->
-          let largs1, largs2 = List.take_n (List.length args  ) largs in
-          let  args1,  args2 = List.take_n (List.length largs1)  args in
+          let largs1, largs2 = List.takedrop (List.length args  ) largs in
+          let  args1,  args2 = List.takedrop (List.length largs1)  args in
             (Mid.of_list (List.combine (List.map fst largs1) args1),
              args2, f_lambda largs2 lbody)
 

@@ -182,3 +182,8 @@ module Cloning : sig
    * theory name. *)
   val clone : scope -> Ax.mode -> theory_cloning -> symbol * scope
 end
+
+(* -------------------------------------------------------------------- *)
+module Search : sig
+  val search : scope -> pformula list -> unit
+end

@@ -45,8 +45,8 @@ module Zipper = struct
 
   let rec zipper_of_cpos ((i, sub) : codepos) zpr s =
     let (s1, i, s2) =
-      try  List.split_n (i-1) s.s_node
-      with Not_found -> raise InvalidCPos
+      try  List.pivot_at (i-1) s.s_node
+      with Invalid_argument _ -> raise InvalidCPos
     in
     match sub with
     | None -> zipper s1 (i::s2) zpr
@@ -201,10 +201,12 @@ exception MatchFailure
 
 type fmoptions = {
   fm_delta : bool;
+  fm_conv  : bool;
 }
 
-let fmrigid = { fm_delta = false; }
-let fmdelta = { fm_delta = true ; }
+let fmsearch = { fm_delta = false; fm_conv = false; }
+let fmrigid  = { fm_delta = false; fm_conv = true ; }
+let fmdelta  = { fm_delta = true ; fm_conv = true ; }
 
 (* Rigid unification *)
 let f_match_core opts hyps (ue, ev) ~ptn subject =
@@ -295,9 +297,11 @@ let f_match_core opts hyps (ue, ev) ~ptn subject =
       end
 
       | _, _ ->
-        let subject = Fsubst.f_subst subst subject in
-          if not (EcReduction.is_conv hyps ptn subject) then
-            raise MatchFailure
+        if opts.fm_conv then begin
+          let subject = Fsubst.f_subst subst subject in
+            if not (EcReduction.is_conv hyps ptn subject) then
+              raise MatchFailure
+        end else raise MatchFailure
 
     with MatchFailure when opts.fm_delta ->
       match fst_map f_node (destr_app ptn),
@@ -602,7 +606,7 @@ module FPosition = struct
       let (tp, ti) =
         match tp.f_node with
         | Fapp (h, hargs) when List.length hargs > na ->
-            let (a1, a2) = List.take_n na hargs in
+            let (a1, a2) = List.takedrop na hargs in
               (f_app h a1 (toarrow (List.map f_ty a2) tp.f_ty), na)
         | _ -> (tp, -1)
       in
@@ -619,7 +623,7 @@ module FPosition = struct
       | `Select i -> begin
           let (f, fs) = EcFol.destr_app fp in
             if List.length fs < i then raise InvalidPosition;
-            let (fs1, fs2) = List.take_n i fs in
+            let (fs1, fs2) = List.takedrop i fs in
             let f' = f_app f fs1 (toarrow (List.map f_ty fs2) fp.f_ty) in
               f_app (tx f') fs2 fp.f_ty
         end

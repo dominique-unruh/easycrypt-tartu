@@ -82,9 +82,12 @@ type rwproofterm = {
 (* -------------------------------------------------------------------- *)
 type location = {
   plc_parent : location option;
-  plc_name   : string;
+  plc_name   : string option;
   plc_loc    : EcLocation.t;
 }
+
+let mk_location ?parent ?name loc =
+  { plc_parent = parent; plc_name = name; plc_loc = loc; }
 
 exception TcError of bool * location option * string Lazy.t
 
@@ -151,10 +154,12 @@ and tcenv_ctxt1 = handle list
 let tc_error (_pe : proofenv) ?(catchable = true) ?loc ?who fmt =
   let buf  = Buffer.create 127 in
   let fbuf = Format.formatter_of_buffer buf in
+  let loc  = loc |> omap (fun loc -> mk_location loc) in
+    ignore (who : string option);       (* FIXME: remove? *)
     Format.kfprintf
       (fun _ ->
          Format.pp_print_flush fbuf ();
-         raise (TcError (catchable, None, lazy (Buffer.contents buf))))
+         raise (TcError (catchable, loc, lazy (Buffer.contents buf))))
       fbuf fmt
 
 (* -------------------------------------------------------------------- *)
@@ -176,7 +181,10 @@ let tc_error_lazy (_pe : proofenv) ?(catchable = true) ?loc ?who msg =
       Buffer.contents buf
   in
 
-  raise (TcError (catchable, None, lazy (getmsg ())))
+  let loc = loc |> omap (fun loc -> mk_location loc) in
+
+  ignore (who : string option);         (* FIXME: remove? *)
+  raise (TcError (catchable, loc, lazy (getmsg ())))
 
 (* -------------------------------------------------------------------- *)
 let tc_error_clear (pe : proofenv) ?catchable ?loc ?who err =
@@ -282,7 +290,7 @@ module FApi = struct
 
   (* ------------------------------------------------------------------ *)
   let as_tcenv1 (tc : tcenv) =
-    if not (List.isempty tc.tce_goals) then
+    if not (List.is_empty tc.tce_goals) then
       assert false;
     tc.tce_tcenv
 
@@ -501,7 +509,7 @@ module FApi = struct
   (* ------------------------------------------------------------------ *)
   let t_firsts (tt : backward) (i : int) (tc : tcenv) =
     if i < 0 then invalid_arg "EcCoreGoal.firsts";
-    let (ln1, ln2) = List.take_n i (tc_opened tc) in
+    let (ln1, ln2) = List.takedrop i (tc_opened tc) in
     let pe, ln1    = on_sub1_goals tt ln1 tc.tce_tcenv.tce_penv in
     let handles    = (List.flatten (ln1 @ [ln2])) in
     tcenv_of_penv ~ctxt:tc.tce_tcenv.tce_ctxt handles pe
@@ -511,7 +519,7 @@ module FApi = struct
     if i < 0 then invalid_arg "EcCoreGoal.lasts";
     let handles    = tc_opened tc in
     let nhandles   = List.length handles in
-    let (ln1, ln2) = List.take_n (max 0 (nhandles-i)) handles in
+    let (ln1, ln2) = List.takedrop (max 0 (nhandles-i)) handles in
     let pe, ln2    = on_sub1_goals tt ln2 tc.tce_tcenv.tce_penv in
     let handles    = (List.flatten (ln1 :: ln2)) in
     tcenv_of_penv ~ctxt:tc.tce_tcenv.tce_ctxt handles pe
@@ -522,7 +530,7 @@ module FApi = struct
 
   (* ------------------------------------------------------------------ *)
   let t_subfirsts (tt : backward list) (tc : tcenv) =
-    let (ln1, ln2) = List.take_n (List.length tt) (tc_opened tc) in
+    let (ln1, ln2) = List.takedrop (List.length tt) (tc_opened tc) in
     let pe, ln1    = on_sub_goals tt ln1 tc.tce_tcenv.tce_penv in
     let handles    = (List.flatten (ln1 @ [ln2])) in
     tcenv_of_penv ~ctxt:tc.tce_tcenv.tce_ctxt handles pe
@@ -531,7 +539,7 @@ module FApi = struct
   let t_sublasts (tt : backward list) (tc : tcenv) =
     let handles    = tc_opened tc in
     let nhandles   = List.length handles in
-    let (ln1, ln2) = List.take_n (max 0 (nhandles-(List.length tt))) handles in
+    let (ln1, ln2) = List.takedrop (max 0 (nhandles-(List.length tt))) handles in
     let pe, ln2    = on_sub_goals tt ln2 tc.tce_tcenv.tce_penv in
     let handles    = (List.flatten (ln1 :: ln2)) in
     tcenv_of_penv ~ctxt:tc.tce_tcenv.tce_ctxt handles pe
@@ -569,10 +577,8 @@ module FApi = struct
 
   (* ------------------------------------------------------------------ *)
   let t_rotate (d : direction) (i : int) (tc : tcenv) =
-    let mrev = match d with `Left -> identity | `Right -> List.rev in
-
     match tc.tce_tcenv.tce_goal with
-    | None   -> tc
+    | None    -> tc
     | Some _g ->
         match List.rotate d (max i 0) (tc_opened tc) with
         | 0, _ -> tc
@@ -581,26 +587,26 @@ module FApi = struct
             let tc    = { tc with tce_goals = s; tce_tcenv = tcenv; } in
             tc_normalize tc
 
+  (* ------------------------------------------------------------------ *)
   let t_swap_goals (g:int) (delta:int) (tc:tcenv) =
     if delta = 0 || tc.tce_tcenv.tce_goal = None then tc
     else
       let s = 
-        let rgs1,g, gs2 = List.split_n g (tc_opened tc) in
+        let rgs1, g, gs2 =
+          try  List.pivot_at g (tc_opened tc)
+          with Invalid_argument _ -> raise InvalidGoalShape
+        in
         if delta < 0 then
           let len = List.length rgs1 in
-          let rgs2, rgs1 = List.take_n (min (-delta) len) rgs1 in
+          let rgs2, rgs1 = List.takedrop (min (-delta) len) rgs1 in
           List.rev_append rgs1 (g :: List.rev_append rgs2 gs2)
         else
           let len = List.length gs2 in
-          let gs1, gs2 = List.take_n (min delta len) gs2 in
+          let gs1, gs2 = List.takedrop (min delta len) gs2 in
           List.rev_append rgs1 (gs1 @ g :: gs2) in
       let tcenv = { tc.tce_tcenv with tce_goal = None; } in
       let tc    = { tc with tce_goals = s; tce_tcenv = tcenv; } in
       tc_normalize tc
-
-      
-  
-    
 
   (* ------------------------------------------------------------------ *)
   let t_seq (tt1 : backward) (tt2 : backward) (tc : tcenv1) =
@@ -846,7 +852,7 @@ let all_opened (pf : proof) =
   pf.pr_opened |> List.map ((^~) FApi.get_pregoal_by_id pf.pr_env)
 
 (* -------------------------------------------------------------------- *)
-let closed (pf : proof) = List.isempty pf.pr_opened
+let closed (pf : proof) = List.is_empty pf.pr_opened
 
 (* -------------------------------------------------------------------- *)
 module Exn = struct
