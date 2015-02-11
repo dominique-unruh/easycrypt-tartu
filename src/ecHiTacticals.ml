@@ -16,6 +16,26 @@ open EcHiGoal
 module TTC = EcProofTyping
 
 (* -------------------------------------------------------------------- *)
+type caseoption = {
+  cod_ambient : bool;
+}
+
+module CaseOptions = struct
+  let default = { cod_ambient = false; }
+
+  let merged1 opts (b, x) =
+    match x with
+    | `Ambient -> { opts with cod_ambient  = b; }
+
+  let merge1 opts ((b, x) : bool * EcParsetree.pcaseoption) =
+    match x with
+    | `Ambient -> { opts with cod_ambient = b; }
+
+  let merge opts (specs : EcParsetree.pcaseoptions) =
+    List.fold_left merge1 opts specs
+end
+
+(* -------------------------------------------------------------------- *)
 let rec process1_debug (_ttenv : ttenv) (tc : tcenv1) =
   FApi.tcenv_of_tcenv1 tc
 
@@ -39,8 +59,7 @@ and process1_try (ttenv : ttenv) (t : ptactic_core) (tc : tcenv1) =
 
 (* -------------------------------------------------------------------- *)
 and process1_admit (_ : ttenv) (tc : tcenv1) =
-  (* FIXME: use notifier *)
-  EcFortune.pick () |> oiter (fun msg -> Printf.printf "[W] %s\n%!" msg);
+  EcFortune.pick () |> oiter (EcEnv.notify (FApi.tc1_env tc) `Warning "%s");
   EcLowGoal.t_admit tc
 
 (* -------------------------------------------------------------------- *)
@@ -49,7 +68,9 @@ and process1_idtac (_ : ttenv) (msg : string option) (tc : tcenv1) =
   EcLowGoal.t_id tc
 
 (* -------------------------------------------------------------------- *)
-and process1_case (_ : ttenv) gp (tc : tcenv1) =
+and process1_case (_ : ttenv) (opts, gp) (tc : tcenv1) =
+  let opts = CaseOptions.merge CaseOptions.default opts in
+
   let form_of_gp () =
     match gp with
     | [`Form (occ, pf)] -> begin
@@ -61,11 +82,11 @@ and process1_case (_ : ttenv) gp (tc : tcenv1) =
     | _ -> tc_error !!tc "must give exactly one boolean formula"
   in
     match (FApi.tc1_goal tc).f_node with
-    | FbdHoareS _ | FhoareS _ ->
+    | FbdHoareS _ | FhoareS _ when not opts.cod_ambient ->
         let fp = TTC.tc1_process_phl_formula tc (form_of_gp ()) in
         EcPhlCase.t_hl_case fp tc
 
-    | FequivS _ ->
+    | FequivS _ when not opts.cod_ambient ->
         let fp = TTC.tc1_process_prhl_formula tc (form_of_gp ()) in
         EcPhlCase.t_equiv_case fp tc
 
@@ -93,14 +114,14 @@ and process1_seq (ttenv : ttenv) (ts : ptactic list) (tc : tcenv1) =
   aux ts (tcenv_of_tcenv1 tc)
 
 (* -------------------------------------------------------------------- *)
-and process1_logic (ttenv : ttenv) (t : logtactic) (tc : tcenv1) =
+and process1_logic (ttenv : ttenv) (t : logtactic located) (tc : tcenv1) =
   let engine = process1_core ttenv in
 
   let tx =
-    match t with
+    match unloc t with
     | Preflexivity      -> process_reflexivity
     | Passumption       -> process_assumption
-    | Psmt pi           -> process_smt ttenv pi
+    | Psmt pi           -> process_smt ~loc:(loc t) ttenv pi
     | Pintro pi         -> process_intros pi
     | Psplit            -> process_split
     | Pfield st         -> process_algebra `Solve `Field st
@@ -128,9 +149,9 @@ and process1_logic (ttenv : ttenv) (t : logtactic) (tc : tcenv1) =
     tx tc
 
 (* -------------------------------------------------------------------- *)
-and process1_phl (_ : ttenv) (t : phltactic) (tc : tcenv1) =
+and process1_phl (_ : ttenv) (t : phltactic located) (tc : tcenv1) =
   let (tx : tcenv1 -> tcenv) =
-    match t with
+    match unloc t with
     | Pfun `Def                 -> EcPhlFun.process_fun_def
     | Pfun (`Abs f)             -> EcPhlFun.process_fun_abs f
     | Pfun (`Upto info)         -> EcPhlFun.process_fun_upto info
@@ -251,13 +272,13 @@ and process_chain (ttenv : ttenv) (t : ptactic_chain) (tc : tcenv) =
   | Pfocus    (t, p)  -> process_focus  ttenv (t, p)  tc
 
 (* -------------------------------------------------------------------- *)
-and process_core (ttenv : ttenv) (t : ptactic_core) (tc : tcenv) =
+and process_core (ttenv : ttenv) ({ pl_loc = loc } as t : ptactic_core) (tc : tcenv) =
   let tactic =
     match unloc t with
     | Pidtac    msg         -> `One (process1_idtac    ttenv msg)
     | Padmit                -> `One (process1_admit    ttenv)
-    | Plogic    t           -> `One (process1_logic    ttenv t)
-    | PPhl      t           -> `One (process1_phl      ttenv t)
+    | Plogic    t           -> `One (process1_logic    ttenv (mk_loc loc t))
+    | PPhl      t           -> `One (process1_phl      ttenv (mk_loc loc t))
     | Pby       t           -> `One (process1_by       ttenv t)
     | Pdo       ((b, n), t) -> `One (process1_do       ttenv (b, n) t)
     | Ptry      t           -> `One (process1_try      ttenv t)

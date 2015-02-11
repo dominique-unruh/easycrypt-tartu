@@ -12,10 +12,13 @@ open EcModules
 
 type memory = EcMemory.memory
 
+module BI = EcBigInt
 module Mp = EcPath.Mp
 module Sp = EcPath.Sp
 module Sm = EcPath.Sm
 module Sx = EcPath.Sx
+
+open EcBigInt.Notations
 
 (* -------------------------------------------------------------------- *)
 type gty =
@@ -47,7 +50,7 @@ and f_node =
   | Fquant  of quantif * binding * form
   | Fif     of form * form * form
   | Flet    of lpattern * form * form
-  | Fint    of int
+  | Fint    of BI.zint
   | Flocal  of EcIdent.t
   | Fpvar   of EcTypes.prog_var * memory
   | Fglob   of EcPath.mpath     * memory
@@ -156,6 +159,15 @@ let gty_fv = function
       EcPath.Sm.fold (fun mp fv -> EcPath.m_fv fv mp) r EcIdent.Mid.empty in
     EcPath.Sx.fold (fun xp fv -> EcPath.x_fv fv xp) rx fv
   | GTmem mt -> EcMemory.mt_fv mt
+
+let gtty (ty : EcTypes.ty) =
+  GTty ty
+
+let gtmodty (mt : module_type) (mr : mod_restr) =
+  GTmodty (mt, mr)
+
+let gtmem (mt : EcMemory.memtype) =
+  GTmem mt
 
 (*-------------------------------------------------------------------- *)
 let b_equal (b1 : binding) (b2 : binding) =
@@ -302,7 +314,7 @@ module Hsform = Why3.Hashcons.Make (struct
         lp_equal lp1 lp2 && f_equal e1 e2 && f_equal f1 f2
 
     | Fint i1, Fint i2 ->
-        i1 = i2
+        BI.equal i1 i2
 
     | Flocal id1, Flocal id2 ->
         EcIdent.id_equal id1 id2
@@ -636,13 +648,13 @@ let f_int_sub f1 f2 = f_app fop_int_sub [f1; f2] tint
 let f_int_mul f1 f2 = f_app fop_int_mul [f1; f2] tint
 let f_int_pow f1 f2 = f_app fop_int_pow [f1; f2] tint
   
-let rec f_int n  =
-  match n with
-  | _ when 0 <= n -> mk_form (Fint n) tint
-  | _             -> f_int_opp (f_int (-n))
+let rec f_int (n : BI.zint) =
+  match BI.sign n with
+  | s when 0 <= s -> mk_form (Fint n) tint
+  | _             -> f_int_opp (f_int (~^ n))
 
-let f_i0 = f_int 0
-let f_i1 = f_int 1
+let f_i0 = f_int BI.zero
+let f_i1 = f_int BI.one
 
 (* -------------------------------------------------------------------- *)
 module FSmart = struct
@@ -1015,7 +1027,10 @@ let destr_programS side f =
 let destr_int f =
   match f.f_node with
   | Fint n -> n
-  | Fapp(op,[{f_node = Fint n}]) when f_equal op fop_int_opp -> -n
+
+  | Fapp (op, [{f_node = Fint n}]) when f_equal op fop_int_opp ->
+      BI.neg n
+
   | _ -> destr_error "destr_int"
 
 (* -------------------------------------------------------------------- *)
@@ -1299,7 +1314,7 @@ module Fsubst = struct
         let ty   = s.fs_ty fp.f_ty in
         let tys  = List.Smart.map s.fs_ty tys in
         let body = oget (Mp.find_opt p s.fs_opdef) in
-          f_subst_op ty tys [] body
+          f_subst_op s.fs_freshen ty tys [] body
 
     | Fop (p, tys) when Mp.mem p s.fs_pddef ->
         let ty   = s.fs_ty fp.f_ty in
@@ -1311,7 +1326,7 @@ module Fsubst = struct
         let ty   = s.fs_ty fp.f_ty in
         let tys  = List.Smart.map s.fs_ty tys in
         let body = oget (Mp.find_opt p s.fs_opdef) in
-          f_subst_op ty tys (List.map (f_subst s) args) body
+          f_subst_op s.fs_freshen ty tys (List.map (f_subst s) args) body
 
     | Fapp ({ f_node = Fop (p, tys) }, args) when Mp.mem p s.fs_pddef ->
         let ty   = s.fs_ty fp.f_ty in
@@ -1435,17 +1450,14 @@ module Fsubst = struct
 
     | _ -> f_map s.fs_ty (f_subst s) fp
 
-  and f_subst_op fty tys args (tyids, e) =
+  and f_subst_op freshen fty tys args (tyids, e) =
     (* FIXME: factor this out *)
-    (* FIXME: is es_freshen value correct? *)
     (* FIXME: is [mhr] good as a default? *)
 
     let e =
       let sty = Tvar.init tyids tys in
       let sty = ty_subst { ty_subst_id with ts_v = Mid.find_opt^~ sty; } in
-      let sty = { e_subst_id with
-                    es_freshen = true;
-                    es_ty      = sty ; } in
+      let sty = { e_subst_id with es_freshen = freshen; es_ty = sty ; } in
         e_subst sty e
     in
 

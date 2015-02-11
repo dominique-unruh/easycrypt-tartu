@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 
 # --------------------------------------------------------------------
 import sys, os, errno, re, glob, shutil, itertools, logging
@@ -44,7 +44,7 @@ def rcolor(txt, b):
 
 # --------------------------------------------------------------------
 def _options():
-    import ConfigParser as cp
+    import configparser as cp
     from optparse import OptionParser
 
     parser = OptionParser()
@@ -72,11 +72,12 @@ def _options():
         help    = 'set the timeout option to pass to EasyCrypt')
 
     parser.add_option(
-        '', '--weak-check',
-        action  = 'store_true',
-        default = False,
-        dest    = 'weakcheck',
-        help    = 'start EasyCrypt in weak-check mode')
+        '', '--jobs',
+        action  = 'store',
+        default = 1,
+        metavar = 'JOBS',
+        type    = 'int',
+        help    = 'number of maximum parallel test jobs')
 
     (cmdopt, args) = parser.parse_args()
 
@@ -87,10 +88,17 @@ def _options():
         if cmdopt.timeout <= 0:
             parser.error('timeout must be positive')
 
+    if cmdopt.jobs <= 0:
+        parse.error('jobs must be positive')
+
+    if cmdopt.jobs > 1:
+        if sys.version_info < (3, 2, 0):
+            parse.error('incompatible options: python <3.2 && jobs >1')
+
     options = Object(scenarios = dict())
-    options.xunit     = cmdopt.xunit
-    options.timeout   = cmdopt.timeout
-    options.weakcheck = cmdopt.weakcheck
+    options.xunit   = cmdopt.xunit
+    options.timeout = cmdopt.timeout
+    options.jobs    = cmdopt.jobs
 
     defaults = dict(args = '', exclude = '', okdirs = '', kodirs = '')
 
@@ -117,11 +125,6 @@ def _options():
         scenario.okdirs  = config.get(test, 'okdirs')
         scenario.kodirs  = config.get(test, 'kodirs')
         scenario.exclude = config.get(test, 'exclude').split()
-        if config.has_option(test, 'cpufactor'):
-            scenario.cpufactor = config.get(test, 'cpufactor').split()
-            scenario.cpufactor = dict(map(_parse_timeout, scenario.cpufactor))
-        else:
-            scenario.cpufactor = dict()
         options.scenarios[test[5:]] = scenario
 
     for x in options.targets:
@@ -141,7 +144,7 @@ def _xunit_dump(config, results):
         grouped.setdefault(result.config.group, []).append(result)
 
     root = E.Element('testsuites')
-    for gname, group in grouped.iteritems():
+    for gname, group in grouped.items():
         ok = [x for x in group if     x.success]
         ko = [x for x in group if not x.success]
 
@@ -184,7 +187,7 @@ def _xunit_dump(config, results):
 
         root.append(node)
 
-    xml = E.tostring(root, method = 'xml', encoding = 'utf-8')
+    xml = str(E.tostring(root, method = 'xml', encoding = 'utf-8'), 'utf-8')
     return '<?xml version="1.0" encoding="utf-8"?>%s\n' % (xml,)
 
 # --------------------------------------------------------------------
@@ -195,12 +198,8 @@ def _run_test(config, options):
     timestamp = time.time()
     try:
         command = [options.bin] + options.args + config.args
-        if options.weakcheck:
-            command.append('-weak-check')
         if options.timeout:
             command.extend(['-timeout', str(options.timeout)])
-        if config.tfactor:
-            command.extend(['-cpu-factor', str(config.tfactor)])
         command.extend([config.filename])
 
         logging.info('command: %r' % (command,))
@@ -212,7 +211,7 @@ def _run_test(config, options):
         finally:
             try   : sp.kill()
             except: pass
-    except OSError, e:
+    except OSError as e:
         logging.error("cannot run `%s': %s" % (options.bin, e))
         exit (1)
     timestamp = time.time() - timestamp
@@ -231,28 +230,31 @@ def _main():
     # ------------------------------------------------------------------
     options = _options()
 
+    logfmt = '%(asctime)-15s - %(levelname)s - %(message)s'
+    if options.jobs > 1:
+        logfmt = '%s %s' % ('[%(threadName)s]', logfmt)
+        
     logging.basicConfig(
         stream = sys.stderr,
         level  = logging.DEBUG,
-        format = '%(asctime)-15s - %(levelname)s - %(message)s')
+        format = logfmt)
 
     # ------------------------------------------------------------------
     def gather(obj, scenario):
         logging.debug("gathering scripts in `%s'" % (obj.src,))
         try:
             scripts = os.listdir(obj.src)
-        except OSError, e:
+        except OSError as e:
             logging.warning("cannot scan `%s': %s" % (obj.src, e))
             return []
         scripts = sorted([x for x in scripts if x.endswith('.ec')])
         logging.debug("%.4d script(s) found in `%s'" % (len(scripts), obj.src))
 
         def config(filename):
-            fullname = os.path.normpath(os.path.join(obj.src, x))
+            fullname = os.path.normpath(os.path.join(obj.src, filename))
             return Object(isvalid  = obj.valid,
                           group    = obj.src,
                           args     = obj.args,
-                          tfactor  = scenario.cpufactor.get(fullname, None),
                           filename = fullname)
 
         return [config(x) for x in scripts]
@@ -284,13 +286,22 @@ def _main():
 
     # --------------------------------------------------------------------
     mainconfig = Object()
-    result = []
 
     mainconfig.hostname  = socket.gethostname()
     mainconfig.timestamp = datetime.datetime.utcnow()
 
-    for config in allscripts:
-        result.append(_run_test(config, options))
+    if options.jobs > 1:
+        import concurrent.futures as futures
+
+    if options.jobs > 1:
+        with futures.ThreadPoolExecutor(options.jobs) as executor:
+            result = list(executor.map(
+                lambda config : _run_test(config, options),
+                allscripts))
+    else:
+        result = []
+        for config in allscripts:
+            result.append(_run_test(config, options))
 
     errors = [x for x in result if not x.success]
     nerrs  = len(errors)
@@ -304,7 +315,8 @@ def _main():
         logging.critical("some tests did NOT pass")
 
     if options.xunit is not None:
-        open(options.xunit, 'wb').write(_xunit_dump(mainconfig, result))
+        open(options.xunit, 'wb')\
+            .write(bytes(_xunit_dump(mainconfig, result), 'utf-8'))
 
     exit (2 if errors else 0)
 

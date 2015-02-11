@@ -13,10 +13,12 @@ open EcParsetree
 open EcTypes
 open EcDecl
 open EcModules
+open EcBigInt.Notations
 
 module Sid  = EcIdent.Sid
 module Mid  = EcIdent.Mid
 module MSym = EcSymbols.Msym
+module BI   = EcBigInt
 
 (* -------------------------------------------------------------------- *)
 type action = {
@@ -499,7 +501,10 @@ module Tactics = struct
           | _         , `WeakCheck ->  hierror "cannot weak-check a non-strict proof script"
           | Some true , `Check     -> `Strict
           | Some false, `Check     -> `Standard
-          | _         , `Check     -> `Strict
+          | None      , `Check     -> `Strict
+          | Some true , `Report    -> `Report
+          | Some false, `Report    -> `Standard
+          | None      , `Report    -> `Report
         in
 
         let ttenv = {
@@ -526,7 +531,7 @@ module Ax = struct
 
   module TT = EcTyping
 
-  type mode = [`WeakCheck | `Check]
+  type mode = [`WeakCheck | `Check | `Report]
 
   (* ------------------------------------------------------------------ *)
   let bind (scope : scope) local ((x, ax) : _ * axiom) =
@@ -571,7 +576,7 @@ module Ax = struct
       { scope with sc_pr_uc = Some puc }
 
   (* ------------------------------------------------------------------ *)
-  let rec add_r (scope : scope) mode (ax : paxiom located) =
+  let rec add_r (scope : scope) (mode : mode) (ax : paxiom located) =
     assert (scope.sc_pr_uc = None);
 
     let loc = ax.pl_loc and ax = ax.pl_desc in
@@ -700,7 +705,7 @@ module Ax = struct
       (Some pac.puc_name, scope)
 
   (* ------------------------------------------------------------------ *)
-  let add (scope : scope) mode (ax : paxiom located) =
+  let add (scope : scope) (mode : mode) (ax : paxiom located) =
     add_r scope mode ax
 
   (* ------------------------------------------------------------------ *)
@@ -758,23 +763,38 @@ module Op = struct
     let op = op.pl_desc and loc = op.pl_loc in
     let ue = TT.transtyvars scope.sc_env (loc, op.po_tyvars) in
 
-    let (ty, body) =
+    let (ty, body, refts) =
       match op.po_def with
       | PO_abstr pty ->
-          (TT.transty TT.tp_relax scope.sc_env ue pty, `Abstract)
+          let env   = scope.sc_env in
+          let codom = TT.transty TT.tp_relax env ue pty in
+          let xs    = snd (TT.transbinding env ue op.po_args) in
+          (EcTypes.toarrow (List.map snd xs) codom, `Abstract, [])
 
-      | PO_concr (bd, pty, pe) ->
+      | PO_concr (pty, pe) ->
           let env     = scope.sc_env in
           let codom   = TT.transty TT.tp_relax env ue pty in
-          let env, xs = TT.transbinding env ue bd in
+          let env, xs = TT.transbinding env ue op.po_args in
           let body    = TT.transexpcast env `InOp ue codom pe in
           let lam     = EcTypes.e_lam xs body in
-            (lam.EcTypes.e_ty, `Plain lam)
+          (lam.EcTypes.e_ty, `Plain lam, [])
 
-      | PO_case (bd, pty, pbs) ->
+      | PO_case (pty, pbs) -> begin
           let name = { pl_loc = loc; pl_desc = unloc op.po_name } in
-          match EHI.trans_matchfix (env scope) ue name (bd, pty, pbs) with
-          | (ty, opinfo) -> (ty, `Fix opinfo)
+          match EHI.trans_matchfix (env scope) ue name (op.po_args, pty, pbs) with
+          | (ty, opinfo) -> (ty, `Fix opinfo, [])
+      end
+
+      | PO_reft (pty, (rname, reft)) ->
+          let env      = scope.sc_env in
+          let codom    = TT.transty TT.tp_relax env ue pty in
+          let _env, xs = TT.transbinding env ue op.po_args in
+          let opty     = EcTypes.toarrow (List.map snd xs) codom in
+          let opabs    = EcDecl.mk_op [] codom None in
+          let openv    = EcEnv.Op.bind (unloc op.po_name) opabs env in
+          let openv    = EcEnv.Var.bind_locals xs openv in
+          let reft     = TT.trans_prop openv ue reft in
+          (opty, `Abstract, [(rname, xs, reft, codom)])
     in
 
     if not (EcUnify.UniEnv.closed ue) then
@@ -797,7 +817,8 @@ module Op = struct
 
     in
 
-    let tyop = EcDecl.mk_op tparams ty body in
+    let tyop   = EcDecl.mk_op tparams ty body in
+    let opname = EcPath.pqname (EcEnv.root (env scope)) (unloc op.po_name) in
 
     if op.po_nosmt && (is_none op.po_ax) then
       hierror ~loc "[nosmt] is only supported for axiomatized operators";
@@ -833,9 +854,39 @@ module Op = struct
     in
 
     let scope =
+      List.fold_left (fun scope (rname, xs, ax, codom) ->
+          let ax = f_forall (List.map (snd_map gtty) xs) ax in
+          let ax =
+            let opargs  = List.map (fun (x, xty) -> e_local x xty) xs in
+            let opapp   = List.map (tvar |- fst) tparams in
+            let opapp   = e_app (e_op opname opapp ty) opargs codom in
+            let tyuni   = { ty_subst_id with ts_u = EcUnify.UniEnv.close ue } in
+            let subst   = Mp.singleton opname ([], opapp) in
+            let subst   = Fsubst.f_subst_init false Mid.empty tyuni subst Mp.empty in
+            Fsubst.f_subst subst ax
+          in
+
+          let ax, axpm =
+            let bdpm = List.map fst tparams in
+            let axpm = List.map EcIdent.fresh bdpm in
+              (EcCoreFol.Fsubst.subst_tvar
+                 (EcTypes.Tvar.init bdpm (List.map EcTypes.tvar axpm))
+                 ax,
+               List.combine axpm (List.map snd tparams)) in
+          let ax =
+            { ax_tparams = axpm;
+              ax_spec    = Some ax;
+              ax_kind    = `Axiom;
+              ax_nosmt   = false; }
+          in Ax.bind scope false (unloc rname, ax))
+        scope refts
+    in
+
+    let scope =
       if not (List.is_empty op.po_aliases) then begin
-        if not (EcUtils.is_none body) then
-          hierror ~loc "multiple operator names are only allowed for abstract operators";
+        if not (EcUtils.is_none body) || not (List.is_empty refts) then
+          hierror ~loc
+            "multiple names are only allowed for non-refined abstract operators";
         let addnew scope name =
           let nparams = List.map (fst_map EcIdent.fresh) tparams in
           let subst = Tvar.init
@@ -1374,12 +1425,15 @@ module Ty = struct
         match tci.pti_args with
         | None -> `Integer
         | Some (`Ring (c, p)) ->
-            if odfl false (c |> omap (fun c -> c < 2)) then
+            if odfl false (c |> omap (fun c -> c <^ BI.of_int 2)) then
               hierror "invalid coefficient modulus";
-            if odfl false (p |> omap (fun p -> p < 2)) then
+            if odfl false (p |> omap (fun p -> p <^ BI.of_int 2)) then
               hierror "invalid power modulus";
-            if c = Some 2 && p = Some 2 then `Boolean else `Modulus (c, p)
-      in addring  scope mode (kind, toptci)
+            if      opt_equal BI.equal c (Some (BI.of_int 2))
+                 && opt_equal BI.equal p (Some (BI.of_int 2))
+            then `Boolean
+            else `Modulus (c, p)
+      in addring scope mode (kind, toptci)
     end
 
     | ([], "field") -> addfield scope mode toptci
@@ -2160,23 +2214,22 @@ end
 module Search = struct
   let search (scope : scope) qs =
     let paths =
-      let do1 aout fp =
+      let do1 fp =
         match unloc fp with
         | PFident (q, None) -> begin
             match EcEnv.Op.all q.pl_desc scope.sc_env with
             | [] ->
                 hierror ~loc:q.pl_loc "unknown operator: `%s'"
                   (EcSymbols.string_of_qsymbol q.pl_desc)
-            | paths -> (List.map (fun x -> `ByPath (fst x)) paths) @ aout
+            | paths -> `ByPath (Sp.of_list (List.map fst paths))
         end
 
         | _ ->
           let ps = ref Mid.empty in
           let ue = EcUnify.UniEnv.create None in
           let fp = EcTyping.trans_pattern scope.sc_env (ps, ue) fp in
-          (`ByPattern ((ps, ue), fp)) :: aout
-
-      in List.fold_left do1 [] qs in
+          `ByPattern ((ps, ue), fp)
+      in List.map do1 qs in
 
     let axioms = EcSearch.search scope.sc_env paths in
 
@@ -2185,7 +2238,7 @@ module Search = struct
     let ppe    = EcPrinting.PPEnv.ofenv scope.sc_env in
 
     List.iter (fun ax ->
-      Format.fprintf fmt "%a@\n" (EcPrinting.pp_axiom ~long:true ppe) ax)
+      Format.fprintf fmt "%a@." (EcPrinting.pp_axiom ~long:true ppe) ax)
       axioms;
     notify scope `Info "%s" (Buffer.contents buffer)
 end

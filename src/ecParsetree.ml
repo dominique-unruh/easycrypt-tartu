@@ -4,6 +4,7 @@
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
+open EcBigInt
 open EcMaps
 open EcSymbols
 open EcLocation
@@ -76,7 +77,7 @@ type ptybinding  = psymbol list * pty
 and  ptybindings = ptybinding list
 
 and pexpr_r =
-  | PEint    of int                               (* int. literal       *)
+  | PEint    of zint                              (* int. literal       *)
   | PEident  of pqsymbol * ptyannot option        (* symbol             *)
   | PEapp    of pexpr * pexpr list                (* op. application    *)
   | PElet    of plpattern * pexpr_wty * pexpr     (* let binding        *)
@@ -228,7 +229,7 @@ type pformula  = pformula_r located
 
 and pformula_r =
   | PFhole
-  | PFint    of int
+  | PFint    of zint
   | PFtuple  of pformula list
   | PFident  of pqsymbol * ptyannot option
   | PFmem    of psymbol
@@ -270,8 +271,9 @@ let rec pf_ident f =
 (* -------------------------------------------------------------------- *)
 type pop_def =
   | PO_abstr of pty
-  | PO_concr of ptybindings * pty * pexpr
-  | PO_case  of ptybindings * pty * pop_branch list
+  | PO_concr of pty * pexpr
+  | PO_case  of pty * pop_branch list
+  | PO_reft  of pty * (psymbol * pformula)
 
 and pop_branch = {
   pop_patterns : pop_pattern list;
@@ -289,6 +291,7 @@ type poperator = {
   po_name   : psymbol;
   po_aliases: psymbol list;
   po_tyvars : (psymbol * pqsymbol list) list option;
+  po_args   : ptybindings;
   po_def    : pop_def;
   po_ax     : psymbol option;
   po_nosmt  : bool;
@@ -536,19 +539,20 @@ type trepeat = [`All | `Maybe] * int option
 type tfocus1 = (int option) pair
 type tfocus  = (tfocus1 list option) pair
 
-type rwarg = (tfocus located) option * rwarg1
+type rwarg = (tfocus located) option * rwarg1 located
 
 and rwarg1 =
-  | RWDelta of (rwside * trepeat option * rwocc * pformula)
-  | RWRw    of (rwside * trepeat option * rwocc * (rwside * ppterm) list)
+  | RWDelta of (rwoptions * pformula)
+  | RWRw    of (rwoptions * (rwside * ppterm) list)
   | RWPr    of (psymbol * pformula option)
   | RWDone  of bool
   | RWSimpl
   | RWSmt
 
-and rwside = [`LtoR | `RtoL]
-and rwocc  = (rwocci * Sint.t) option
-and rwocci = [`Inclusive | `Exclusive]
+and rwoptions = rwside * trepeat option * rwocc
+and rwside    = [`LtoR | `RtoL]
+and rwocc     = (rwocci * Sint.t) option
+and rwocci    = [`Inclusive | `Exclusive]
 
 (* -------------------------------------------------------------------- *)
 type intropattern1 =
@@ -593,6 +597,10 @@ type ppgoption = [
 type ppgoptions = (bool * ppgoption) list
 
 (* -------------------------------------------------------------------- *)
+type pcaseoption  = [ `Ambient ]
+type pcaseoptions = (bool * pcaseoption) list
+
+(* -------------------------------------------------------------------- *)
 type apply_info = [
   | `ApplyIn of eppterm * psymbol
   | `Apply   of eppterm list * [`Apply|`Exact]
@@ -634,7 +642,7 @@ and ptactic_core_r =
   | Pby         of (ptactics) option
   | Por         of ptactic * ptactic
   | Pseq        of ptactics
-  | Pcase       of genpattern list
+  | Pcase       of (pcaseoptions * genpattern list)
   | Plogic      of logtactic
   | PPhl        of phltactic
   | Pprogress   of ppgoptions * ptactic_core option
@@ -698,7 +706,7 @@ type ptycinstance = {
   pti_type : (psymbol * pqsymbol list) list * pty;
   pti_ops  : (psymbol * (pty list * pqsymbol)) list;
   pti_axs  : (psymbol * ptactic_core) list;
-  pti_args : [`Ring of (int option * int option)] option;
+  pti_args : [`Ring of (zint option * zint option)] option;
 }
 
 (* -------------------------------------------------------------------- *)
