@@ -20,9 +20,9 @@ open EcCoreGoal
 open EcCoreGoal.FApi
 open EcLowGoal
 
-module Sid = EcIdent.Sid
-module Mid = EcIdent.Mid
-module Sp  = EcPath.Sp
+module Sid  = EcIdent.Sid
+module Mid  = EcIdent.Mid
+module Sp   = EcPath.Sp
 
 module ER  = EcReduction
 module PT  = EcProofTerm
@@ -33,7 +33,7 @@ module LG  = EcCoreLib.CI_Logic
 (* -------------------------------------------------------------------- *)
 type ttenv = {
   tt_provers   : EcParsetree.pprover_infos -> EcProvers.prover_infos;
-  tt_smtmode   : [`Admit | `Strict | `Standard];
+  tt_smtmode   : [`Admit | `Strict | `Standard | `Report];
   tt_implicits : bool;
 }
 
@@ -114,8 +114,8 @@ let process_simplify ri (tc : tcenv1) =
   let delta_p, delta_h =
     ri.pdelta
       |> omap (List.fold_left do1 (Sp.empty, Sid.empty))
-      |> omap (fun (x, y) -> (Some x, Some y))
-      |> odfl (None, None)
+      |> omap (fun (x, y) -> (Sp.mem^~ x, Sid.mem^~ y))
+      |> odfl (predT, predT)
   in
 
   let ri = {
@@ -164,15 +164,20 @@ let process_dbhint pf env db =
 (* -------------------------------------------------------------------- *)
 type smtinfo = pdbhint option * pprover_infos
 
-let process_smt (ttenv : ttenv) (db, pi) (tc : tcenv1) =
+let process_smt ?loc (ttenv : ttenv) (db, pi) (tc : tcenv1) =
   let env = FApi.tc1_env tc in
   let db  = process_dbhint !!tc env db in
   let pi  = ttenv.tt_provers pi in
 
   match ttenv.tt_smtmode with
-  | `Admit    -> t_admit tc
-  | `Standard -> t_seq (t_simplify ~delta:false) (t_smt ~strict:false db pi) tc
-  | `Strict   -> t_seq (t_simplify ~delta:false) (t_smt ~strict:true  db pi) tc
+  | `Admit ->
+      t_admit tc
+
+  | (`Standard | `Strict) as mode ->
+      t_seq (t_simplify ~delta:false) (t_smt ~mode db pi) tc
+
+  | `Report ->
+      t_seq (t_simplify ~delta:false) (t_smt ~mode:(`Report loc) db pi) tc
 
 (* -------------------------------------------------------------------- *)
 let process_clear symbols tc =
@@ -290,6 +295,23 @@ let process_rewrite1_core (s, o) pt tc =
 let process_delta (s, o, p) tc =
   let env, hyps, concl = FApi.tc1_eflat tc in
 
+  match unloc p with
+  | PFident ({ pl_desc = ([], x) }, None)
+      when s = `LtoR && EcUtils.is_none o ->
+
+    let check_op = fun p -> sym_equal (EcPath.basename p) x in
+    let check_id = fun y -> sym_equal (EcIdent.name y) x in
+    let concl = EcReduction.simplify
+      { EcReduction.no_red with
+          EcReduction.delta_p = check_op;
+          EcReduction.delta_h = check_id; }
+      hyps concl
+
+    in FApi.tcenv_of_tcenv1 (t_change concl tc)
+
+  | _ ->
+
+  (* Continue with matching based unfolding *)
   let (ptenv, p) =
     let (ps, ue), p = TTC.tc1_process_pattern tc p in
     let ev = MEV.of_idents (Mid.keys ps) `Form in
@@ -405,7 +427,7 @@ let process_delta (s, o, p) tc =
 
 (* -------------------------------------------------------------------- *)
 let rec process_rewrite1 ttenv ri tc =
-  match ri with
+  match unloc ri with
   | RWDone b ->
       let tt = if b then t_simplify ~delta:false else t_id in
       FApi.t_seq tt process_trivial tc
@@ -413,7 +435,7 @@ let rec process_rewrite1 ttenv ri tc =
   | RWSimpl ->
       t_simplify ~delta:false tc
 
-  | RWDelta (s, r, o, p) -> begin
+  | RWDelta ((s, r, o), p) -> begin
       let do1 tc = process_delta (s, o, p) tc in
 
       match r with
@@ -421,7 +443,7 @@ let rec process_rewrite1 ttenv ri tc =
       | Some (b, n) -> t_do b n do1 tc
   end
 
-  | RWRw ((s : rwside), r, o, pts) -> begin
+  | RWRw (((s : rwside), r, o), pts) -> begin
       let do1 ((subs : rwside), pt) tc =
         let theside =
           match s, subs with
@@ -458,7 +480,7 @@ let rec process_rewrite1 ttenv ri tc =
   | RWPr (x,f) -> EcPhlPrRw.t_pr_rewrite (unloc x, f) tc
 
   | RWSmt ->
-      process_smt ttenv (None, empty_pprover) tc
+      process_smt ~loc:ri.pl_loc ttenv (None, empty_pprover) tc
 
 (* -------------------------------------------------------------------- *)
 let process_rewrite ttenv ri tc =

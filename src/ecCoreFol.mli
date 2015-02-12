@@ -5,6 +5,7 @@
 
 (* -------------------------------------------------------------------- *)
 open EcUtils
+open EcBigInt
 open EcPath
 open EcMaps
 open EcIdent
@@ -21,6 +22,10 @@ type gty =
   | GTty    of EcTypes.ty
   | GTmodty of module_type * mod_restr
   | GTmem   of EcMemory.memtype
+
+val gtty    : EcTypes.ty -> gty
+val gtmodty : module_type -> mod_restr -> gty
+val gtmem   : EcMemory.memtype -> gty
 
 val gty_equal : gty  -> gty -> bool
 val gty_fv    : gty -> int Mid.t
@@ -45,7 +50,7 @@ and f_node =
   | Fquant  of quantif * binding * form
   | Fif     of form * form * form
   | Flet    of lpattern * form * form
-  | Fint    of int
+  | Fint    of zint
   | Flocal  of EcIdent.t
   | Fpvar   of EcTypes.prog_var * memory
   | Fglob   of mpath * memory
@@ -252,7 +257,7 @@ val fop_int_pow : form
 val f_i0 : form
 val f_i1 : form
 
-val f_int      : int -> form
+val f_int      : zint -> form
 val f_int_add  : form -> form -> form
 val f_int_sub  : form -> form -> form
 val f_int_opp  : form -> form
@@ -327,7 +332,7 @@ val destr_bdHoareF  : form -> bdHoareF
 val destr_bdHoareS  : form -> bdHoareS
 val destr_pr        : form -> pr
 val destr_programS  : [`Left | `Right] option -> form -> memenv * stmt
-val destr_int       : form -> int
+val destr_int       : form -> zint
 
 (* -------------------------------------------------------------------- *)
 val is_true      : form -> bool

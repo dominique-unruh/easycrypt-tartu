@@ -13,6 +13,8 @@ open EcFol
 open EcBaseLogic
 open EcEnv
 
+module BI = EcBigInt
+
 (* -------------------------------------------------------------------- *)
 exception IncompatibleType of env * (ty * ty)
 exception IncompatibleForm of env * (form * form)
@@ -120,7 +122,7 @@ module EqTest = struct
 
     and aux_r alpha e1 e2 =
       match e1.e_node, e2.e_node with
-      | Eint   i1, Eint   i2 -> i1 = i2
+      | Eint i1, Eint i2 -> BI.equal i1 i2
       | Elocal id1, Elocal id2 -> EcIdent.id_equal (find alpha id1) id2
       | Evar   p1, Evar   p2 -> for_pv_norm env p1 p2
       | Eop(o1,ty1), Eop(o2,ty2) ->
@@ -185,8 +187,8 @@ end
 (* -------------------------------------------------------------------- *)
 type reduction_info = {
   beta    : bool;
-  delta_p : Sp.t option;
-  delta_h : Sid.t option;
+  delta_p : (path  -> bool);
+  delta_h : (ident -> bool);
   zeta    : bool;
   iota    : bool;
   logic   : bool;
@@ -195,8 +197,8 @@ type reduction_info = {
 
 let full_red = {
   beta    = true;
-  delta_p = None;
-  delta_h = None;
+  delta_p = EcUtils.predT;
+  delta_h = EcUtils.predT;
   zeta    = true;
   iota    = true;
   logic   = true;
@@ -205,30 +207,31 @@ let full_red = {
 
 let no_red = {
   beta    = false;
-  delta_p = Some Sp.empty;
-  delta_h = Some Sid.empty;
+  delta_p = EcUtils.pred0;
+  delta_h = EcUtils.pred0;
   zeta    = false;
   iota    = false;
   logic   = false;
   modpath = false;
 }
 
-let beta_red = { no_red with beta = true }
-let betaiota_red = { no_red with beta = true; iota = true }
+let beta_red     = { no_red with beta = true; }
+let betaiota_red = { no_red with beta = true; iota = true; }
+
 let nodelta =
-  { full_red with delta_h = Some Mid.empty;
-    delta_p = Some EcPath.Mp.empty }
+  { full_red with
+      delta_h = EcUtils.pred0;
+      delta_p = EcUtils.pred0; }
+
 let reduce_local ri hyps x  =
-  match ri.delta_h with
-  | None -> LDecl.reduce_var x hyps
-  | Some s when Sid.mem x s -> LDecl.reduce_var x hyps
-  | _ -> raise NotReducible
+  if   ri.delta_h x
+  then LDecl.reduce_var x hyps
+  else raise NotReducible
 
 let reduce_op ri env p tys =
-  match ri.delta_p with
-  | None -> Op.reduce env p tys
-  | Some s when Sp.mem p s -> Op.reduce env p tys
-  | _ -> raise NotReducible
+  if   ri.delta_p p
+  then Op.reduce env p tys
+  else raise NotReducible
 
 let is_record env f =
   match EcFol.destr_app f with
@@ -372,11 +375,8 @@ let rec h_red ri env hyps f =
       let pv' = EcEnv.NormMp.norm_pvar env pv in
         if pv_equal pv pv' then raise NotReducible else f_pvar pv' f.f_ty m
 
-    (* δ-reduction *)
-  | Fop (p, tys) -> reduce_op ri env p tys
-
     (* logical reduction *)
-  | Fapp ({f_node = Fop (p, _); } as fo, args) when ri.logic && is_logical_op p ->
+  | Fapp ({f_node = Fop (p, tys); } as fo, args) when ri.logic && is_logical_op p ->
       let f' =
         match op_kind p, args with
         | Some (`Not      ), [f1]    -> f_not_simpl f1
@@ -412,11 +412,25 @@ let rec h_red ri env hyps f =
 
             | _ -> fallback ()
         end
-        | _  -> f
+
+        | _ when ri.delta_p p ->
+            let op = reduce_op ri env p tys in
+            f_app_simpl op args f.f_ty
+
+        | _ -> f
       in
         if   f_equal f f'
         then f_app fo (h_red_args ri env hyps args) f.f_ty
         else f'
+
+    (* δ-reduction *)
+  | Fop (p, tys) ->
+      reduce_op ri env p tys
+
+    (* δ-reduction *)
+  | Fapp ({ f_node = Fop (p, tys) }, args) when ri.delta_p p ->
+      let op = reduce_op ri env p tys in
+      f_app_simpl op args f.f_ty
 
     (* contextual rule - let *)
   | Flet (lp, f1, f2) -> f_let lp (h_red ri env hyps f1) f2
