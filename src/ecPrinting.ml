@@ -2108,7 +2108,6 @@ let pp_goal (ppe : PPEnv.t) fmt (g, extra) =
   begin
     match n with
     | 1 -> Format.fprintf fmt "Current goal@\n@\n%!"
-    | -1 -> Format.fprintf fmt "@\n@\n+++++++++++++++++++++++++++++++++++++@\n%!"
     | _ -> Format.fprintf fmt "Current goal (remaining: %d)@\n@\n%!" n
   end;
   
@@ -2122,12 +2121,6 @@ let pp_goal (ppe : PPEnv.t) fmt (g, extra) =
         Format.printf "@[<hov 2>@\n%a@]@."
           (PPGoal.pp_goal1 ~pphyps:false ~idx:(i+2) ppe) g)
         gs
-
-let rec pp_goals (ppe : PPEnv.t) fmt (n, goals) =
-  match goals with
-  | [] -> ()
-  | (hyps,concl)::rest -> pp_goal ppe fmt (n,(hyps,concl)); pp_goals ppe fmt (n,rest);;
-
 
 (* -------------------------------------------------------------------- *)
 let pp_mod_params ppe bms =

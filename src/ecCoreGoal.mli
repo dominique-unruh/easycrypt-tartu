@@ -149,7 +149,6 @@ val start : LDecl.hyps -> form -> proof
 (* Return the first opened goal of this interactive proof and the
  * number of open goals. *)
 val opened : proof -> (int * pregoal) option
-val opened_all : proof -> (int * pregoal list) option
 
 (* Return the list of opened goals - by handle *)
 val all_hd_opened : proof -> handle list

@@ -735,7 +735,7 @@ let pp_current_goal ?(all = false) stream =
       | S.PSCheck pf -> begin
           let ppe = EcPrinting.PPEnv.ofenv (S.env scope) in
 
-          match EcCoreGoal.opened_all pf with
+          match EcCoreGoal.opened pf with
           | None -> Format.fprintf stream "No more goals@\n%!"
 
           | Some (n, g) ->
