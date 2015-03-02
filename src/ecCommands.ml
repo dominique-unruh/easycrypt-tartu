@@ -442,8 +442,8 @@ and process_th_require1 ld scope (x, io) =
         let scope = EcScope.Theory.require scope (name, kind) loader in
           match io with
           | None         -> scope
-          | Some `Export -> process_th_export scope ([], name)
-          | Some `Import -> process_th_import scope ([], name)
+          | Some `Export -> EcScope.Theory.export scope ([], name)
+          | Some `Import -> EcScope.Theory.import scope ([], name)
 
 (* -------------------------------------------------------------------- *)
 and process_th_require ld scope (xs, io) =
@@ -452,14 +452,14 @@ and process_th_require ld scope (xs, io) =
     scope xs
 
 (* -------------------------------------------------------------------- *)
-and process_th_import (scope : EcScope.scope) name =
+and process_th_import (scope : EcScope.scope) (names : pqsymbol list) =
   EcScope.check_state `InTop "theory import" scope;
-  EcScope.Theory.import scope name
+  List.fold_left EcScope.Theory.import scope (List.map unloc names)
 
 (* -------------------------------------------------------------------- *)
-and process_th_export (scope : EcScope.scope) name =
+and process_th_export (scope : EcScope.scope) (names : pqsymbol list) =
   EcScope.check_state `InTop "theory export" scope;
-  EcScope.Theory.export scope name
+  List.fold_left EcScope.Theory.export scope (List.map unloc names)
 
 (* -------------------------------------------------------------------- *)
 and process_th_clone (scope : EcScope.scope) (thcl, io) =
@@ -467,8 +467,8 @@ and process_th_clone (scope : EcScope.scope) (thcl, io) =
   let (name, scope) = EcScope.Cloning.clone scope (!pragma).pm_check thcl in
     match io with
     | None         -> scope
-    | Some `Export -> process_th_export scope ([], name)
-    | Some `Import -> process_th_import scope ([], name)
+    | Some `Export -> EcScope.Theory.export scope ([], name)
+    | Some `Import -> EcScope.Theory.import scope ([], name)
 
 (* -------------------------------------------------------------------- *)
 and process_w3_import (scope : EcScope.scope) (p, f, r) =
@@ -561,8 +561,8 @@ and process (ld : EcLoader.ecloader) (scope : EcScope.scope) g =
       | GthOpen      name -> `Fct   (fun scope -> process_th_open    scope  (snd_map unloc name))
       | GthClose     name -> `Fct   (fun scope -> process_th_close   scope  name.pl_desc)
       | GthRequire   name -> `Fct   (fun scope -> process_th_require ld scope name)
-      | GthImport    name -> `Fct   (fun scope -> process_th_import  scope  name.pl_desc)
-      | GthExport    name -> `Fct   (fun scope -> process_th_export  scope  name.pl_desc)
+      | GthImport    name -> `Fct   (fun scope -> process_th_import  scope  name)
+      | GthExport    name -> `Fct   (fun scope -> process_th_export  scope  name)
       | GthClone     thcl -> `Fct   (fun scope -> process_th_clone   scope  thcl)
       | GsctOpen     name -> `Fct   (fun scope -> process_sct_open   scope  name)
       | GsctClose    name -> `Fct   (fun scope -> process_sct_close  scope  name)
@@ -634,34 +634,40 @@ type context = {
   ct_level   : int;
   ct_current : EcScope.scope;
   ct_root    : EcScope.scope;
-  ct_stack   : EcScope.scope list;
+  ct_stack   : (EcScope.scope list) option;
 }
 
 let context = ref (None : context option)
 
-let rootctxt (scope : EcScope.scope) =
-  { ct_level = 0; ct_current = scope; ct_root = scope; ct_stack = []; }
+let rootctxt ?(undo = true) (scope : EcScope.scope) =
+  { ct_level   = 0;
+    ct_current = scope;
+    ct_root    = scope;
+    ct_stack   = if undo then Some [] else None; }
 
 (* -------------------------------------------------------------------- *)
 let pop_context context =
-  assert (not (List.is_empty context.ct_stack));
-
-  { ct_level   = context.ct_level - 1;
-    ct_root    = context.ct_root;
-    ct_current = List.hd context.ct_stack;
-    ct_stack   = List.tl context.ct_stack; }
+  match context.ct_stack with
+  | None -> EcScope.hierror "undo stack disabled"
+  | Some stack ->
+      assert (not (List.is_empty stack));
+      { ct_level   = context.ct_level - 1;
+        ct_root    = context.ct_root;
+        ct_current = List.hd stack;
+        ct_stack   = Some (List.tl stack); }
 
 (* -------------------------------------------------------------------- *)
 let push_context scope context =
   { ct_level   = context.ct_level + 1;
     ct_root    = context.ct_root;
     ct_current = scope;
-    ct_stack   = context.ct_current :: context.ct_stack; }
+    ct_stack   = context.ct_stack
+      |> omap (fun st -> context.ct_current :: st); }
 
 (* -------------------------------------------------------------------- *)
-let initialize ~boot ~checkmode =
+let initialize ~undo ~boot ~checkmode =
   assert (!context = None);
-  context := Some (rootctxt (initial ~checkmode ~boot))
+  context := Some (rootctxt ~undo (initial ~checkmode ~boot))
 
 (* -------------------------------------------------------------------- *)
 type notifier = EcGState.loglevel -> string Lazy.t -> unit

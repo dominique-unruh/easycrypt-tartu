@@ -162,15 +162,26 @@ let t_fail (tc : tcenv1) =
   tc_error !!tc ~who:"fail" "explicit call to [fail]"
 
 (* -------------------------------------------------------------------- *)
+let t_close ?who (t : FApi.backward) (tc : tcenv1) =
+  let tc = t tc in
+
+  if not (FApi.tc_done tc) then
+    tc_error !$tc ?who "expecting a closed goal";
+  tc
+
+(* -------------------------------------------------------------------- *)
 let t_id (tc : tcenv1) =
   FApi.tcenv_of_tcenv1 tc
 
 (* -------------------------------------------------------------------- *)
 let t_change (fp : form) (tc : tcenv1) =
   let hyps, concl = FApi.tc1_flat tc in
-  if not (EcReduction.is_conv hyps fp concl) then
-    raise InvalidGoalShape;
-  FApi.mutate1 tc (fun hd -> VConv (hd, Sid.empty)) fp
+
+  if concl == fp then tc else begin
+    if not (EcReduction.is_conv hyps fp concl) then
+      raise InvalidGoalShape;
+    FApi.mutate1 tc (fun hd -> VConv (hd, Sid.empty)) fp
+  end
 
 (* -------------------------------------------------------------------- *)
 let t_simplify_with_info (ri : reduction_info) (tc : tcenv1) =

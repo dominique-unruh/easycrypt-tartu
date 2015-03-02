@@ -207,7 +207,7 @@ let _ =
   end;
 
   (* Initialize I/O + interaction module *)
-  let (prvopts, input, terminal) =
+  let (prvopts, input, terminal, interactive) =
     match options.o_command with
     | `Config ->
         let config = {
@@ -225,13 +225,13 @@ let _ =
           | (false, true)  -> lazy (EcTerminal.from_webui ())
           | (_, _) -> lazy (EcTerminal.from_tty ())
         in
-          (cliopts.clio_provers, None, terminal)
+          (cliopts.clio_provers, None, terminal, true)
     end
 
     | `Compile cmpopts -> begin
         let input = cmpopts.cmpo_input in
         let terminal = lazy (EcTerminal.from_channel ~name:input (open_in input)) in
-          (cmpopts.cmpo_provers, Some input, terminal)
+          (cmpopts.cmpo_provers, Some input, terminal, false)
     end
   in
 
@@ -254,7 +254,7 @@ let _ =
       EcCommands.cm_profile   = prvopts.prvo_profile;
     } in
 
-    EcCommands.initialize ~boot:ldropts.ldro_boot ~checkmode
+    EcCommands.initialize ~undo:interactive ~boot:ldropts.ldro_boot ~checkmode
   end;
 
   begin
@@ -298,9 +298,11 @@ let _ =
                    let loc = p.EcLocation.pl_loc in
                      try  EcCommands.process p
                      with e -> begin
-                       if not (EcTerminal.interactive terminal) then
-                         Printf.fprintf stderr "%t\n%!" Printexc.print_backtrace;
-                     raise (EcCommands.toperror_of_exn ~gloc:loc e)
+                       if Printexc.backtrace_status () then begin
+                         if not (EcTerminal.interactive terminal) then
+                           Printf.fprintf stderr "%t\n%!" Printexc.print_backtrace
+                       end;
+                       raise (EcCommands.toperror_of_exn ~gloc:loc e)
                    end)
                 commands
 

@@ -1,18 +1,22 @@
 # -*- Makefile -*-
 
 # --------------------------------------------------------------------
-OCAMLBUILD_BIN   = ocamlbuild -use-ocamlfind
-OCAMLBUILD_EXTRA = -classic-display
+OCAMLBUILD_JOBS  ?= 1
+OCAMLBUILD_BIN   ?= ocamlbuild
+OCAMLBUILD_EXTRA ?= 
+OCAMLBUILD_OPTS  := -use-ocamlfind -j $(OCAMLBUILD_JOBS)
+OCAMLBUILD_OPTS  += -classic-display
 
 # In Emacs, use classic display to enable error jumping.
 ifeq ($(shell echo $$TERM), dumb)
- OCAMLBUILD_EXTRA += -classic-display
+ OCAMLBUILD_OPTS += -classic-display
 endif
 ifeq ($(LINT),1)
- OCAMLBUILD_EXTRA += -tag lint
+ OCAMLBUILD_OPTS += -tag lint
 endif
+OCAMLBUILD_OPTS += $(OCAMLBUILD_EXTRA)
 
-OCAMLBUILD := $(OCAMLBUILD_BIN) $(OCAMLBUILD_EXTRA)
+OCAMLBUILD := $(OCAMLBUILD_BIN) $(OCAMLBUILD_OPTS)
 
 DESTDIR    ?=
 PREFIX     ?= /usr/local
@@ -26,6 +30,7 @@ include Makefile.system
 # --------------------------------------------------------------------
 BINDIR := $(PREFIX)/bin
 LIBDIR := $(PREFIX)/lib/easycrypt
+SHRDIR := $(PREFIX)/share/easycrypt
 SYSDIR := $(LIBDIR)/system
 
 # --------------------------------------------------------------------
@@ -69,7 +74,7 @@ callprover:
 define check-for-staled-files
 	if [ -d "$(DESTDIR)$(PREFIX)/lib/easycrypt/" ]; then   \
 	  cd "$(DESTDIR)$(LIBDIR)/" &&           \
-	    find theories -type f -name '*.ec' 2>/dev/null |   \
+	    find theories -type f -name '*.ec*' 2>/dev/null |   \
 	    sed 's/^/!! FOUND STALED FILE: /';                 \
 	fi
 endef
@@ -82,8 +87,11 @@ install: ec.native uninstall
 	$(INSTALL) -m 0755 -T system/callprover$(EXE) $(DESTDIR)$(SYSDIR)/callprover$(EXE)
 	for i in $$(find theories -type d); do \
 	  $(INSTALL) -m 0755 -d $(DESTDIR)$(LIBDIR)/$$i ';'; \
-	  $(INSTALL) -m 0644 -t $(DESTDIR)$(LIBDIR)/$$i $$i/*.ec; \
+	  $(INSTALL) -m 0644 -t $(DESTDIR)$(LIBDIR)/$$i $$i/*.ec*; \
 	done
+	$(INSTALL) -m 0755 -d $(DESTDIR)$(SHRDIR)
+	$(INSTALL) -m 0755 -d $(DESTDIR)$(SHRDIR)/emacs
+	$(INSTALL) -m 0644 -t $(DESTDIR)$(SHRDIR)/emacs proofgeneral/easycrypt/*.el
 
 define rmdir
 	-@if [ -d "$(1)" ]; then rmdir "$(1)"; fi
@@ -94,13 +102,17 @@ uninstall:
 	rm -f $(DESTDIR)$(SYSDIR)/callprover
 	$(call rmdir,$(DESTDIR)$(SYSDIR))
 	for i in $$(find theories -depth -type d); do \
-	  for j in $$i/*.ec; do rm -f $(DESTDIR)$(LIBDIR)/$$j; done; \
+	  for j in $$i/*.ec*; do rm -f $(DESTDIR)$(LIBDIR)/$$j; done; \
 	  rmdir $(DESTDIR)$(LIBDIR)/$$i 2>/dev/null || true; \
 	done
+	rm -f $(DESTDIR)$(SHRDIR)/emacs/*.el
+	$(call rmdir,$(DESTDIR)$(SHRDIR)/emacs)
+	$(call rmdir,$(DESTDIR)$(SHRDIR))
 
 uninstall-purge:
 	rm  -f $(DESTDIR)$(BINDIR)/easycrypt
 	rm -rf $(DESTDIR)$(LIBDIR)
+	rm -rf $(DESTDIR)$(SHRDIR)
 
 tests: check
 

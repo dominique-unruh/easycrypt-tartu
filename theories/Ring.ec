@@ -6,44 +6,7 @@
 pragma +implicits.
 
 (* -------------------------------------------------------------------- *)
-require import Fun.
-require import Int.
-
-(* -------------------------------------------------------------------- *)
-(* FIXME: TO BE MOVED                                                   *)
-theory IterOp.
-  op iter ['a] : int -> ('a -> 'a) -> 'a -> 'a.
-
-  axiom iter0 ['a] n opr (x : 'a): n <= 0 => iter n opr x = x.
-  axiom iterS ['a] n opr (x : 'a): 0 <= n => iter (n+1) opr x = opr (iter n opr x).
-
-  op iteri ['a] : int -> (int -> 'a -> 'a) -> 'a -> 'a.
-
-  axiom iteri0 ['a] n opr (x : 'a): n <= 0 => iteri n opr x  = x.
-  axiom iteriS ['a] n opr (x : 'a): 0 <= n => iteri (n+1) opr x = opr n (iteri n opr x).
-
-  op iterop ['a] (n : int) opr (x z : 'a) : 'a =
-    let f = fun i y, if i <= 0 then x else opr x y in
-    iteri n f z.
-
-  lemma iterop0 ['a] (n : int) opr (x z : 'a): n <= 0 =>
-    iterop n opr x z = z.
-  proof. by move=> le0_n; rewrite /iterop /= iteri0. qed.
-
-  lemma iterop1 ['a] opr (x z : 'a): iterop 1 opr x z = x.
-  proof. by rewrite /iterop /= (iteriS 0). qed.
-
-  lemma iteropS ['a] (n : int) opr (x z : 'a): 0 <= n =>
-    iterop (n+1) opr x z = iter n (opr x) x.
-  proof.
-    rewrite /iterop; elim n=> /=.
-    + by rewrite iter0 // (iteriS 0).
-    + move=> i ge0_i ih; rewrite iteriS 1:smt /= ih.
-      by rewrite -(iterS _ (opr x)) //; cut ->: ! (i+1 <= 0) by smt.
-  qed.
-end IterOp.
-
-import IterOp.
+require import Fun Int IntExtra.
 
 (* -------------------------------------------------------------------- *)
 abstract theory ZModule.
@@ -53,10 +16,10 @@ abstract theory ZModule.
   op ( + ) : t -> t -> t.
   op [ - ] : t -> t.
 
-  axiom addrA: forall (x y z : t), x + (y + z) = (x + y) + z.
-  axiom addrC: forall (x y   : t), x + y = y + x.
-  axiom add0r: forall (x     : t), zeror + x = x.
-  axiom addNr: forall (x     : t), (-x) + x = zeror.
+  axiom nosmt addrA: forall (x y z : t), x + (y + z) = (x + y) + z.
+  axiom nosmt addrC: forall (x y   : t), x + y = y + x.
+  axiom nosmt add0r: forall (x     : t), zeror + x = x.
+  axiom nosmt addNr: forall (x     : t), (-x) + x = zeror.
 
   op ( - ) (x y : t) = x + -y axiomatized by subrE.
 
@@ -68,11 +31,11 @@ abstract theory ZModule.
 
   lemma nosmt addrCA (x y z : t):
     x + (y + z) = y + (x + z).
-  proof. by rewrite !addrA (addrC x y). qed.
+  proof. by rewrite !addrA @(addrC x y). qed.
 
   lemma nosmt addrAC (x y z : t):
     (x + y) + z = (x + z) + y.
-  proof. by rewrite -!addrA (addrC y z). qed.
+  proof. by rewrite -!addrA @(addrC y z). qed.
 
   lemma nosmt subrr (x : t): x - x = zeror.
   proof. by rewrite subrE /= addrN. qed.
@@ -90,16 +53,16 @@ abstract theory ZModule.
   proof. by rewrite -addrA addNr addr0. qed.
 
   lemma nosmt addrI (x y z : t): x + y = x + z => y = z.
-  proof. by move=> h; rewrite -(addKr x z) -h addKr. qed.
+  proof. by move=> h; rewrite -@(addKr x z) -h addKr. qed.
 
   lemma nosmt addIr (x y z : t): y + x = z + x => y = z.
-  proof. by move=> h; rewrite -(addrK x z) -h addrK. qed.
+  proof. by move=> h; rewrite -@(addrK x z) -h addrK. qed.
 
   lemma nosmt opprK (x : t): -(-x) = x.
   proof. by apply @(addIr (-x)); rewrite addNr addrN. qed.
 
   lemma nosmt oppr0: -zeror = zeror.
-  proof. by rewrite -(addr0 (-zeror)) addNr. qed.
+  proof. by rewrite -@(addr0 (-zeror)) addNr. qed.
 
   lemma nosmt subr0 (x : t): x - zeror = x.
   proof. by rewrite subrE /= oppr0 addr0. qed.
@@ -111,7 +74,7 @@ abstract theory ZModule.
   proof. by apply @(addrI (x + y)); rewrite addrA addrN addrAC addrK addrN. qed.
 
   lemma nosmt opprB (x y : t): -(x - y) = y - x.
-  proof. by rewrite subrE /= opprD opprK addrC. qed.
+  proof. by rewrite !subrE opprD opprK addrC. qed.
 
   lemma nosmt subr_eq (x y z : t):
     (x - z = y) <=> (x = y + z).
@@ -125,7 +88,7 @@ abstract theory ZModule.
   proof. by rewrite subr_eq add0r. qed.
 
   lemma nosmt addr_eq0 (x y : t): (x + y = zeror) <=> (x = -y).
-  proof. by rewrite -(subr_eq0 x) subrE /= opprK. qed.
+  proof. by rewrite -@(subr_eq0 x) subrE /= opprK. qed.
 
   lemma nosmt eqr_opp (x y : t): (- x = - y) <=> (x = y).
   proof.
@@ -165,7 +128,7 @@ realize addrA. by smt. qed.
 realize addrC. by smt. qed.
 realize add0r. by smt. qed.
 realize addNr. by smt. qed.
-realize subrE. by do 2! (apply/ExtEq.fun_ext=> _); smt. qed.
+realize subrE. by smt. qed.
 
 (* -------------------------------------------------------------------- *)
 abstract theory ComRing.
@@ -176,18 +139,18 @@ abstract theory ComRing.
   op oner  : t.
   op ( * ) : t -> t -> t.
 
-  axiom oner_neq0 : oner <> zeror.
-  axiom mulrA     : forall (x y z : t), x * (y * z) = (x * y) * z.
-  axiom mulrC     : forall (x y   : t), x * y = y * x.
-  axiom mul1r     : forall (x     : t), oner * x = x.
-  axiom mulrDl    : forall (x y z : t), (x + y) * z = (x * z) + (y * z).
+  axiom nosmt oner_neq0 : oner <> zeror.
+  axiom nosmt mulrA     : forall (x y z : t), x * (y * z) = (x * y) * z.
+  axiom nosmt mulrC     : forall (x y   : t), x * y = y * x.
+  axiom nosmt mul1r     : forall (x     : t), oner * x = x.
+  axiom nosmt mulrDl    : forall (x y z : t), (x + y) * z = (x * z) + (y * z).
 
   lemma nosmt mulr1 (x : t): x * oner = x.
   proof. by rewrite mulrC mul1r. qed.
 
   lemma nosmt mulrDr (x y z : t):
     x * (y + z) = x * y + x * z.
-  proof. by rewrite mulrC mulrDl !(mulrC _ x). qed.
+  proof. by rewrite mulrC mulrDl !@(mulrC _ x). qed.
 
   op ofint n = intmul oner n.
 
@@ -270,7 +233,7 @@ abstract theory Field.
       apply @(mulKr _ nz_x).
   qed.
 
-  axiom invK (x : t): inv (inv x) = x.
+  axiom invrK (x : t): inv (inv x) = x.
 
   op exp (x : t) (n : int) =
     if n < 0
@@ -292,8 +255,48 @@ abstract theory Field.
   qed.
 
   lemma exprN (x : t) (i : int): exp x (-i) = inv (exp x i).
-  proof. by rewrite /exp /= IntZMod.opprK (fun_if inv) invK; smt. qed.
+  proof. by rewrite /exp /= IntZMod.opprK @(fun_if inv) invK; smt. qed.
 end Field.
+
+(* --------------------------------------------------------------------- *)
+abstract theory Additive.
+  type t1, t2.
+
+  clone import Self.ZModule as ZM1 with type t <- t1.
+  clone import Self.ZModule as ZM2 with type t <- t2.
+
+  pred additive (f : t1 -> t2) =
+    forall (x y : t1), f (x - y) = f x - f y.
+
+  op f : { t1 -> t2 | additive f } as f_is_additive.
+
+  lemma raddf0: f ZM1.zeror = ZM2.zeror.
+  proof. by rewrite -ZM1.subr0 f_is_additive ZM2.subrr. qed.
+
+  lemma raddfB (x y : t1): f (x - y) = f x - f y.
+  proof. by apply/f_is_additive. qed.
+
+  lemma raddfN (x : t1): f (- x) = - (f x).
+  proof. by rewrite -ZM1.sub0r raddfB raddf0 ZM2.sub0r. qed.
+
+  lemma raddfD (x y : t1): f (x + y) = f x + f y.
+  proof.
+    rewrite -{1}@(ZM1.opprK y) -ZM1.subrE raddfB raddfN.
+    by rewrite ZM2.subrE ZM2.opprK.
+  qed.
+end Additive.
+
+(* --------------------------------------------------------------------- *)
+abstract theory Multiplicative.
+  type t1, t2.
+
+  clone import Self.ComRing as ZM1 with type t <- t1.
+  clone import Self.ComRing as ZM2 with type t <- t2.
+
+  pred multiplicative (f : t1 -> t2) =
+       f ZM1.oner = ZM2.oner
+    /\ forall (x y : t1), f (x * y) = f x * f y.
+end Multiplicative.
 
 (* --------------------------------------------------------------------- *)
 (* Rewrite database for algebra tactic                                   *)

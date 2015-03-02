@@ -232,6 +232,7 @@
 %token GENERALIZE
 %token GLOB
 %token GOAL
+%token HAVE
 %token HINT
 %token HOARE
 %token HYPOTHESIS
@@ -692,6 +693,7 @@ expr_u:
       let loc = EcLocation.make $startpos $endpos in
         PEapp (mk_loc loc id, [e]) }
 
+| FUN pd=ptybindings IMPL  e=expr
 | FUN pd=ptybindings COMMA e=expr { PElambda (pd, e) }
 
 expr_field:
@@ -912,6 +914,7 @@ form_u(P):
 | FORALL pd=pgtybindings COMMA e=form_r(P) { PFforall (pd, e) }
 | EXIST  pd=pgtybindings COMMA e=form_r(P) { PFexists (pd, e) }
 | FUN    pd=ptybindings  COMMA e=form_r(P) { PFlambda (pd, e) }
+| FUN    pd=ptybindings  IMPL  e=form_r(P) { PFlambda (pd, e) }
 
 | r=loc(RBOOL) TILD e=sform_r(P)
     { let id  = PFident (mk_loc r.pl_loc EcCoreLib.s_dbitstring, None) in
@@ -1540,8 +1543,8 @@ import_flag:
 theory_require :
 | REQUIRE ip=import_flag? x=uident+ { (x, ip) }
 
-theory_import: IMPORT x=uqident { x }
-theory_export: EXPORT x=uqident { x }
+theory_import: IMPORT xs=uqident* { xs }
+theory_export: EXPORT xs=uqident* { xs }
 
 theory_w3:
 | IMPORT WHY3 path=string_list r=plist0(renaming,SEMICOLON)
@@ -1683,8 +1686,8 @@ gpterm(F):
 %inline pterm:
 | pt=gpterm(form) { pt }
 
-epterm:
-| x=boption(AT) pt=pterm
+%inline epterm:
+| x=iboption(AT) pt=pterm
     { (if x then `Explicit else `Implicit), pt }
 
 pcutdef:
@@ -1732,11 +1735,11 @@ rwarg1:
    { RWSmt }
 
 rwpterms:
-| f=pterm
+| f=epterm
     { [(`LtoR, f)] }
 
 | LPAREN fs=rlist2(rwpterm, COMMA) RPAREN
-    { fs }
+    { List.map (snd_map (fun f -> (`Implicit, f))) fs }
 
 rwpterm:
 | s=rwside f=pterm
@@ -1916,11 +1919,8 @@ logtactic:
 | GENERALIZE l=genpattern+
    { Pgeneralize l }
 
-| MOVE
-   { Pgeneralize [] }
-
-| MOVE COLON gp=genpattern+
-   { Pgeneralize gp }
+| MOVE vw=prefix(SLASH, pterm)* gp=option(prefix(COLON, genpattern+))
+   { Pmove (vw, odfl [] gp) }
 
 | CLEAR l=loc(intro_pattern_1_name)+
    { Pclear l }
@@ -1958,22 +1958,22 @@ logtactic:
 | RIGHT
     { Pright }
 
-| ELIM e=genpattern*
+| ELIM COLON? e=genpattern*
    { Pelim (e, None) }
 
-| ELIM SLASH p=qident e=genpattern*
+| ELIM SLASH p=qident COLON? e=genpattern*
    { Pelim (e, Some p) }
 
-| APPLY e=epterm
+| APPLY COLON? e=epterm
    { Papply (`Apply ([e], `Apply)) }
 
 | APPLY es=prefix(SLASH, epterm)+
    { Papply (`Apply (es, `Apply)) }
 
-| APPLY e=epterm IN x=ident
+| APPLY COLON? e=epterm IN x=ident
    { Papply (`ApplyIn (e, x)) }
 
-| EXACT e=epterm
+| EXACT COLON? e=epterm
    { Papply (`Apply ([e], `Exact)) }
 
 | EXACT es=prefix(SLASH, epterm)+
@@ -1994,13 +1994,13 @@ logtactic:
 | SUBST l=sform*
    { Psubst l }
 
-| CUT ip=intro_pattern* COLON p=form %prec prec_below_IMPL
+| ior_(CUT, HAVE) ip=intro_pattern* COLON p=form %prec prec_below_IMPL
    { Pcut (ip, p, None) }
 
-| CUT ip=intro_pattern* COLON p=form BY t=loc(tactics)
+| ior_(CUT, HAVE) ip=intro_pattern* COLON p=form BY t=loc(tactics)
    { Pcut (ip, p, Some t) }
 
-| CUT ip=intro_pattern* CEQ fp=pcutdef
+| ior_(CUT, HAVE) ip=intro_pattern* CEQ fp=pcutdef
    { Pcutdef (ip, fp) }
 
 | POSE o=rwocc? x=ident CEQ p=form_h %prec prec_below_IMPL
@@ -2375,7 +2375,7 @@ tactic_core_r:
 | ADMIT
    { Padmit }
 
-| CASE opts=caseoptions? gp=genpattern*
+| CASE COLON? opts=caseoptions? gp=genpattern*
    { Pcase (odfl [] opts, gp) }
 
 | PROGRESS opts=pgoptions? t=tactic_core? {
@@ -2836,6 +2836,15 @@ __rlist1(X, S):                         (* left-recursive *)
   }
 
 (* -------------------------------------------------------------------- *)
+%inline iboption(X):
+| X { true  }
+|   { false }
+
 %inline uoption(X):
 | x=X { Some x }
 | UNDERSCORE { None }
+
+(* -------------------------------------------------------------------- *)
+%inline ior_(X, Y):
+| x=X { `Left  x }
+| y=Y { `Right y }

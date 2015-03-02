@@ -249,6 +249,10 @@ let rec h_red ri env hyps f =
   | Flocal x -> reduce_local ri hyps x
 
     (* ζ-reduction *)
+  | Fapp ({ f_node = Flocal x }, args) ->
+      f_app_simpl (reduce_local ri hyps x) args f.f_ty
+
+    (* ζ-reduction *)
   | Flet (LSymbol(x,_), e1, e2) when ri.zeta ->
       let s = Fsubst.f_bind_local Fsubst.f_subst_id x e1 in
         Fsubst.f_subst s e2
@@ -398,9 +402,8 @@ let rec h_red ri env hyps f =
         | Some (`Real_mul ), [f1;f2] -> f_real_mul_simpl f1 f2
         | Some (`Real_div ), [f1;f2] -> f_real_div_simpl f1 f2
         | Some (`Eq       ), [f1;f2] -> begin
-            let fallback () = f_eq_simpl f1 f2 in
-            match (fst (destr_app f1)).f_node, (fst (destr_app f2)).f_node with
-            | Fop (p1, _), Fop (p2, _)
+            match fst_map f_node (destr_app f1), fst_map f_node (destr_app f2) with
+            | (Fop (p1, _), args1), (Fop (p2, _), args2)
                 when EcEnv.Op.is_dtype_ctor env p1
                   && EcEnv.Op.is_dtype_ctor env p2 ->
 
@@ -408,9 +411,11 @@ let rec h_red ri env hyps f =
                   let idx = EcEnv.Op.by_path p env in
                     snd (EcDecl.operator_as_ctor idx)
                 in
-                  if idx p1 <> idx p2 then f_false else fallback ()
+                  if   idx p1 <> idx p2
+                  then f_false
+                  else f_ands (List.map2 f_eq args1 args2)
 
-            | _ -> fallback ()
+            | _ -> f_eq_simpl f1 f2
         end
 
         | _ when ri.delta_p p ->
@@ -673,15 +678,19 @@ let h_red_opt ri hyps f = h_red_opt ri (LDecl.toenv hyps) hyps f
 
 let rec simplify ri hyps f =
   let f' = try h_red ri hyps f with NotReducible -> f in
-  if f == f' then simplify_rec ri hyps f
-       (*f_map (fun ty -> ty) (simplify ri hyps) f*)
+  if   f == f'
+  then simplify_rec ri hyps f
   else simplify ri hyps f'
 
 and simplify_rec ri hyps f =
   match f.f_node with
-  | Fapp({f_node = Fop _} as fo, args) -> 
-    let f' = f_app fo (List.map (simplify ri hyps) args) f.f_ty in
-    (try h_red ri hyps f' with NotReducible -> f')
+  | Fapp ({ f_node = Fop _ } as fo, args) -> 
+      let args' = List.map (simplify ri hyps) args in
+      let app1  = (fo, args , f.f_ty) in
+      let app2  = (fo, args', f.f_ty) in
+      let f'    =  EcFol.FSmart.f_app (f, app1) app2 in
+      (try h_red ri hyps f' with NotReducible -> f')
+
   | _ -> f_map (fun ty -> ty) (simplify ri hyps) f
 
 (* -------------------------------------------------------------------- *)

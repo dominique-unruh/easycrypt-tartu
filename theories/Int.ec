@@ -14,28 +14,46 @@ op int_of_bool (b : bool) = if b then 1 else 0.
 op zeroz = 0.
 op onez  = 1.
 
+lemma nosmt addz1_neq0 (i : int): 0 <= i => i+1 <> 0
+by [].
+
 lemma nosmt onez_neq0 : 1 <> 0 
 by [].
 
 lemma nosmt addzA (x y z : int): x + (y + z) = (x + y) + z
 by [].
 
-lemma nosmt addzC (x y   : int): x + y = y + x
+lemma nosmt addzC (x y : int): x + y = y + x
 by [].
 
-lemma nosmt add0z (x     : int): 0 + x = x
+lemma nosmt add0z (x : int): 0 + x = x
 by [].
 
-lemma nosmt addNz (x     : int): (-x) + x = 0
+lemma nosmt addNz (x : int): (-x) + x = 0
+by [].
+
+lemma nosmt addzCA (x y z : int): x + (y + z) = y + (x + z)
+by [].
+
+lemma nosmt addzAC (x y z : int): (x + y) + z = (x + z) + y
+by [].
+
+lemma nosmt addIz (x1 x2 y : int): x1 + y = x2 + y => x1 = x2
+by [].
+
+lemma nosmt addzI (x1 x2 y : int): y + x1 = y + x2 => x1 = x2
+by [].
+
+lemma nosmt addAzN (x y : int): (x + y) - y = x
 by [].
 
 lemma nosmt mulzA  (x y z : int): x * (y * z) = (x * y) * z
 by [].
 
-lemma nosmt mulzC  (x y   : int): x * y = y * x
+lemma nosmt mulzC  (x y : int): x * y = y * x
 by [].
 
-lemma nosmt mul1z  (x     : int): 1 * x = x
+lemma nosmt mul1z  (x : int): 1 * x = x
 by [].
 
 lemma nosmt mulzDl (x y z : int): (x + y) * z = x * z + y * z
@@ -100,6 +118,37 @@ theory Induction.
     apply (induction (fun i, forall k, 0 <= k <= i => p k) _ _ i); smt.
   qed.
 
+  lemma nosmt natind (p : int -> bool):
+       (forall n, n <= 0 => p n)
+    => (forall n, 0 <= n => p n => p (n+1))
+    => forall n, p n.
+  proof.
+    move=> h0 hS n; case (n < 0); 1: smt.
+    by rewrite -lezNgt; elim/induction n; smt.
+  qed.
+
+  lemma nosmt natcase (p : int -> bool):
+       (forall n, n <= 0 => p n)
+    => (forall n, 0 <= n => p (n+1))
+    => forall n, p n.
+  proof. smt. qed.
+
+  lemma nosmt ge0ind (p : int -> bool):
+       (forall n, n < 0 => p n)
+    => p 0
+    => (forall n, 0 <= n => p n => p (n+1))
+    => forall n, p n.
+  proof.
+    move=> hN h0 hS n; case (n < 0); 1: by move=> /hN.
+    by rewrite -lezNgt; elim/induction n.
+  qed.
+
+  lemma nosmt ge0case (p : int -> bool):
+       (forall n, n < 0 => p n)
+    => p 0
+    => (forall n, 0 <= n => p (n+1))
+    => forall n, p n.
+  proof. smt. qed.
 end Induction.
 
 (* Fold operator *)
@@ -189,6 +238,15 @@ export EuclDiv.
 theory Extrema.
   op min (a b:int) = if (a < b) then a else b.
 
+  lemma nosmt minC a b : min a b = min b a
+  by [].
+
+  lemma nosmt min_lel a b : a <= b => min a b = a
+  by [].
+
+  lemma nosmt min_ler a b : a <= b => min b a = a
+  by [].
+
   lemma nosmt min_is_lb a b:
     min a b <= a /\
     min a b <= b
@@ -219,6 +277,15 @@ theory Extrema.
     min a b = if (a < b) then a else b. *)
 
   op max (a b:int) = if (a < b) then b else a.
+
+  lemma nosmt maxC a b : max a b = max b a
+  by [].
+
+  lemma nosmt max_lel a b : a <= b => max b a = b
+  by [].
+
+  lemma nosmt max_ler a b : a <= b => max a b = b
+  by [].
 
   lemma nosmt max_is_ub a b:
     a <= max a b /\

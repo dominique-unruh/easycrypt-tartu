@@ -543,7 +543,7 @@ type rwarg = (tfocus located) option * rwarg1 located
 
 and rwarg1 =
   | RWDelta of (rwoptions * pformula)
-  | RWRw    of (rwoptions * (rwside * ppterm) list)
+  | RWRw    of (rwoptions * (rwside * eppterm) list)
   | RWPr    of (psymbol * pformula option)
   | RWDone  of bool
   | RWSimpl
@@ -625,6 +625,7 @@ type logtactic =
   | Papply      of apply_info
   | Pcut        of (intropattern * pformula * ptactics located option)
   | Pcutdef     of (intropattern * pcutdef)
+  | Pmove       of (ppterm list * genpattern list)
   | Pgeneralize of genpattern list
   | Pclear      of psymbol list
   | Prewrite    of rwarg list
@@ -834,8 +835,8 @@ type global =
   | GthOpen      of (bool * psymbol)
   | GthClose     of psymbol
   | GthRequire   of (psymbol list * [`Import|`Export] option)
-  | GthImport    of pqsymbol
-  | GthExport    of pqsymbol
+  | GthImport    of pqsymbol list
+  | GthExport    of pqsymbol list
   | GthClone     of (theory_cloning * [`Import|`Export] option)
   | GthW3        of (string list * string * w3_renaming list)
   | GsctOpen     of psymbol option

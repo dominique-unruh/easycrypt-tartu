@@ -6,7 +6,8 @@
 (* -------------------------------------------------------------------- *)
 open EcUtils
 
-module L = Lexing
+module L  = Lexing
+module LC = EcLocation
 
 (* -------------------------------------------------------------------- *)
 type status =[
@@ -19,7 +20,7 @@ type loglevel = EcGState.loglevel
 class type terminal =
 object
   method interactive : bool
-  method next        : EcParsetree.prog EcLocation.located
+  method next        : EcParsetree.prog LC.located
   method notice      : immediate:bool -> loglevel -> string -> unit
   method finish      : status -> unit
   method finalize    : unit
@@ -86,12 +87,12 @@ object(self)
         let (loc, e) =
           match e with
           | EcCommands.TopError (loc, e) -> (loc, e)
-          | _ -> (EcLocation._dummy, e)
+          | _ -> (LC._dummy, e)
         in
           Format.fprintf Format.err_formatter
             "[error-%d-%d]%s\n%!"
-            (max 0 (loc.EcLocation.loc_bchar - startpos))
-            (max 0 (loc.EcLocation.loc_echar - startpos))
+            (max 0 (loc.LC.loc_bchar - startpos))
+            (max 0 (loc.LC.loc_echar - startpos))
             (EcPException.tostring e)
 
   method finalize =
@@ -185,15 +186,15 @@ object(self)
         let (loc, e) =
           match e with
           | EcCommands.TopError (loc, e) -> (loc, e)
-          | _ -> (EcLocation._dummy, e)
+          | _ -> (LC._dummy, e)
         in
 
         let msg =
           Yojson.Safe.to_string ~std:true
             (`Assoc [ ("type" , `String "error");
                       ("value", `String (EcPException.tostring e));
-                      ("start", `Int (max 0 (loc.EcLocation.loc_bchar - startpos)));
-                      ("stop" , `Int (max 0 (loc.EcLocation.loc_echar - startpos))) ])
+                      ("start", `Int (max 0 (loc.LC.loc_bchar - startpos)));
+                      ("stop" , `Int (max 0 (loc.LC.loc_echar - startpos))) ])
         in self#_print_raw msg
 
   method finalize =
@@ -210,15 +211,15 @@ object(self)
   val (*---*) iparser = EcIo.from_channel ~name stream
   val mutable sz    = -1
   val mutable tick  = -1
-  val mutable loc   = EcLocation._dummy
+  val mutable loc   = LC._dummy
   val mutable doprg =
     (Sys.os_type = "Unix") &&
     (Unix.isatty (Unix.descr_of_out_channel stdout))
 
 
   method private _update_progress =
-    let lineno   = fst (loc.EcLocation.loc_end) in
-    let position = loc.EcLocation.loc_echar in
+    let lineno   = fst (loc.LC.loc_end) in
+    let position = loc.LC.loc_echar in
 
     let mem = (Gc.stat ()).Gc.live_words in
     let mem = (float_of_int mem) *. (float_of_int (Sys.word_size / 8)) in
@@ -237,54 +238,63 @@ object(self)
 
     if sz >= 0 && doprg then begin
       tick <- (tick + 1) mod (String.length ticks);
-      Format.eprintf "[%c] [%.4d] %.1f %% (%.1f%s / [frag %.1f%s])\r%!"
+      Printf.eprintf "[%c] [%.4d] %.1f %% (%.1f%s / [frag %.1f%s])\r%!"
         ticks.[tick] lineno
         (100. *. ((float_of_int position) /. (float_of_int sz)))
         mem memst unu unust
     end
 
-  method private _clear_update =
-    let fmt = "[*] [----] ---.- (------.-?B% - [---- ------.-?B%])" in
-      if sz >= 0 && doprg then
-        Format.eprintf "%*s\r%!" (String.length fmt) "";
-      doprg <- false
+  method private _clear_update ?(erase = true) ~final () =
+    if erase then begin
+      let fmt = "[*] [----] ---.- (------.-?B% - [---- ------.-?B%])" in
+        if sz >= 0 && doprg then
+          Printf.eprintf "%*s\r%!" (String.length fmt) ""
+    end else Printf.eprintf "\n%!";
+    doprg <- not final
+
+  method private _notice ?subloc ~immediate (lvl : loglevel) (msg : string) =
+    let (_ : unit) = ignore immediate in
+
+    if EcGState.accept_log ~level:`Warning ~wanted:lvl then
+      let prefix = EcGState.string_of_loglevel lvl in
+      let strloc =
+        match subloc with
+        | None -> Printf.sprintf "%s:%d" name (fst (loc.LC.loc_end))
+        | Some loc -> LC.tostring loc
+      in
+        self#_clear_update ~final:false ();
+        Printf.eprintf "[%.8s] [%s] %s\n%!" prefix strloc msg;
+        self#_update_progress
 
   method interactive = false
 
   method next =
     let aout = EcIo.parse iparser in
-    loc <- aout.EcLocation.pl_loc;
+    loc <- aout.LC.pl_loc;
     self#_update_progress; aout
 
-  method notice ~(immediate:bool) (lvl : loglevel) (msg : string) =
-    let (_ : unit) = ignore immediate in
-
-    if EcGState.accept_log ~level:`Warning ~wanted:lvl then
-      let prefix = EcGState.string_of_loglevel lvl in
-
-      self#_clear_update;
-      Printf.printf "[%.7s] [%s:%d] %s\n%!"
-        prefix name (fst (loc.EcLocation.loc_end)) msg
+  method notice ~immediate lvl msg =
+    self#_notice ~immediate lvl msg
 
   method finish (status : status) =
     match status with
     | `ST_Ok -> ()
 
     | `ST_Failure e -> begin
-        self#_clear_update;
-        match e with
-        | EcCommands.TopError (loc, e) ->
-            Format.eprintf "%s: %a\n%!"
-              (EcLocation.tostring loc)
-              EcPException.exn_printer e
+        let (subloc, e) =
+          match e with
+          | EcCommands.TopError (loc, e) -> (Some loc, e)
+          | _ -> (None, e) in
+        let msg = String.strip (EcPException.tostring e) in
 
-        | _ ->
-            Format.eprintf "%a\n%!"
-              EcPException.exn_printer e
+        self#_clear_update ~final:false ();
+        self#_notice ?subloc ~immediate:true `Critical msg;
+        self#_update_progress;
+        self#_clear_update ~erase:false ~final:true ()
       end
 
   method finalize =
-    self#_clear_update;
+    self#_clear_update ~final:true ();
     EcIo.finalize iparser;
 
   initializer begin
