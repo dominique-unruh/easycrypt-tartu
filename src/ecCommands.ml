@@ -462,13 +462,9 @@ and process_th_export (scope : EcScope.scope) (names : pqsymbol list) =
   List.fold_left EcScope.Theory.export scope (List.map unloc names)
 
 (* -------------------------------------------------------------------- *)
-and process_th_clone (scope : EcScope.scope) (thcl, io) =
+and process_th_clone (scope : EcScope.scope) thcl =
   EcScope.check_state `InTop "theory cloning" scope;
-  let (name, scope) = EcScope.Cloning.clone scope (!pragma).pm_check thcl in
-    match io with
-    | None         -> scope
-    | Some `Export -> EcScope.Theory.export scope ([], name)
-    | Some `Import -> EcScope.Theory.import scope ([], name)
+  EcScope.Cloning.clone scope (!pragma).pm_check thcl
 
 (* -------------------------------------------------------------------- *)
 and process_w3_import (scope : EcScope.scope) (p, f, r) =
@@ -534,7 +530,12 @@ and process_pragma (scope : EcScope.scope) opt =
 (* -------------------------------------------------------------------- *)
 and process_option (scope : EcScope.scope) (name, value) =
   match unloc name with
-  | "implicits" -> EcScope.Options.set_implicits scope value
+  | "implicits" ->
+      EcScope.Options.set_implicits scope value
+
+  | "Smt:lazy" ->
+      EcScope.Options.set_smtversion scope (if value then `Lazy else `Full)
+
   | _ -> EcScope.hierror "unknown option: %s" (unloc name)
 
 (* -------------------------------------------------------------------- *)
@@ -584,7 +585,7 @@ and process (ld : EcLoader.ecloader) (scope : EcScope.scope) g =
 
 (* -------------------------------------------------------------------- *)
 and process_internal ld scope g =
-  odfl scope (process ld scope g)
+  odfl scope (process ld scope g.gl_action)
 
 (* -------------------------------------------------------------------- *)
 let loader = EcLoader.create ()
@@ -704,13 +705,16 @@ let reset () =
   context := Some (rootctxt (oget !context).ct_root)
 
 (* -------------------------------------------------------------------- *)
-let process (g : global located) : unit =
+let process ?(timed = false) (g : global_action located) : unit =
   let current = oget !context in
   let scope   = current.ct_current in
+  let timed   = if timed then EcUtils.timed else (fun f x -> (-1.0, f  x)) in
 
   try
-    process loader scope g
-      |> oiter (fun scope -> context := Some (push_context scope current))
+    let (tdelta, oscope) = timed (process loader scope) g in
+    oscope |> oiter (fun scope -> context := Some (push_context scope current));
+    if tdelta >= 0. then
+      EcScope.notify scope `Info "time: %f" tdelta
   with Pragma `Reset ->
     reset ()
 

@@ -1,6 +1,6 @@
 (* --------------------------------------------------------------------
  * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Distributed under the terms of the CeCILL-B licence.
  * -------------------------------------------------------------------- *)
 
 require import Int.
@@ -358,7 +358,7 @@ section.
       by rewrite Interval.mem_interval.
     rewrite Mrplus.sum_add /=.
       by rewrite Interval.mem_interval;smt.
-    cut Hq : q%r <> Real.zero by smt.
+    cut Hq : q%r <> 0%r by smt.
     fieldeq => //.
     rewrite -(Mrplus.sum_comp (( * ) (-1)%r)) //;first intros x y;ringeq.
     rewrite (Mrplus_inter_shift 0 (q - 1 - 1) (-1)) /=.

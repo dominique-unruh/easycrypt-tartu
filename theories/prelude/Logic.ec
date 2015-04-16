@@ -1,6 +1,6 @@
 (* --------------------------------------------------------------------
  * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Distributed under the terms of the CeCILL-B licence.
  * -------------------------------------------------------------------- *)
 
 (*** Base Logic Rules *)
@@ -54,6 +54,10 @@ lemma nosmt absurd  : forall (b a : bool), (!a => !b) => b => a by [].
 lemma nosmt contra  (c b : bool) : (c  =>  b) => !b => !c by [].
 lemma nosmt contraL (c b : bool) : ( c => !b) =>  b => !c by [].
 lemma nosmt contraR (c b : bool) : (!c =>  b) => !b =>  c by [].
+
+lemma nosmt contraNneq (b : bool) (x y : 'a):
+  (x = y => b) => !b => x <> y
+by [].
 
 (** unit *)
 lemma nosmt unit_ind (P : unit -> bool):

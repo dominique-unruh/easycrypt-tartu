@@ -34,6 +34,12 @@ let try_finally (body : unit -> 'a) (cleanup : unit -> unit) =
   in
     cleanup (); aout
 
+let timed f x =
+  let t1   = Unix.gettimeofday () in
+  let aout = f x in
+  let t2   = Unix.gettimeofday () in
+  (t2 -. t1, aout)
+
 let identity x = x
 
 let pred0 (_ : 'a) = false
@@ -376,6 +382,13 @@ module List = struct
         | (x :: xs, y :: ys) -> (f x y) && (all2 (xs, ys))
         | (_      , _      ) -> false
       in all2 (xs, ys)
+
+    let prefix2 =
+      let rec prefix2 (r1, r2) xs ys =
+        match xs, ys with
+        | [], _ | _, [] -> (List.rev r1, xs), (List.rev r2, ys)
+        | x::xs, y::ys  -> prefix2 (x::r1, y::r2) xs ys
+      in fun xs ys -> prefix2 ([], []) xs ys
   end
 
   include Parallel
@@ -385,6 +398,9 @@ module List = struct
     match Exceptionless.last s with
     | None   -> failwith "List.last"
     | Some x -> x
+
+  let mbfilter (p : 'a -> bool) (s : 'a list) =
+    match s with [] | [_] -> s | _ -> List.filter p s
 
   let rec fusion f xs ys =
     match xs, ys with
@@ -451,6 +467,15 @@ module List = struct
     let mrev   = match d with `Left -> identity | `Right -> rev in
     let hd, tl = takedrop i (mrev xs) in
     (i, mrev (tl @ hd))
+
+  (* ------------------------------------------------------------------ *)
+  let ksort ?(stable = false) ?(rev = false) ~key ~cmp xs =
+    let cmp  =
+      match rev with
+      | false -> (fun x y -> cmp (key x) (key y))
+      | true  -> (fun y x -> cmp (key x) (key y)) in
+    let sort = if stable then List.stable_sort else List.sort in
+    sort cmp xs
 end
 
 (* -------------------------------------------------------------------- *)
@@ -508,7 +533,28 @@ module String = struct
 end
 
 (* -------------------------------------------------------------------- *)
+module Buffer = struct
+  include BatBuffer
+
+  let from_string ?(size = 0) (s : string) : t =
+    let buffer = BatBuffer.create size in
+    BatBuffer.add_string buffer s; buffer
+
+  let from_char ?(size = 0) (c : char) : t =
+    let buffer = BatBuffer.create size in
+    BatBuffer.add_char buffer c; buffer
+end
+
+(* -------------------------------------------------------------------- *)
+module Regexp = struct
+  include Str
+end
+
+(* -------------------------------------------------------------------- *)
 module Os = struct
+  let getenv (name : string) =
+    try Some (Sys.getenv name) with Not_found -> None
+
   let listdir (dir : string) =
     BatEnum.fold (fun xs x -> x :: xs) [] (BatSys.files_of dir)
 end

@@ -17,6 +17,8 @@ val try_nf : (unit -> 'a) -> 'a option
 
 val try_finally : (unit -> 'a) -> (unit -> unit) -> 'a
 
+val timed : ('a -> 'b) -> 'a -> float * 'b
+
 (* -------------------------------------------------------------------- *)
 val identity : 'a -> 'a
 
@@ -161,6 +163,7 @@ end
 
 (* -------------------------------------------------------------------- *)
 module Os : sig
+  val getenv  : string -> string option
   val listdir : string -> string list
 end
 
@@ -174,6 +177,19 @@ module String : sig
   include module type of BatString
 
   val split_lines : string -> string list
+end
+
+(* -------------------------------------------------------------------- *)
+module Buffer : sig
+  include module type of BatBuffer
+
+  val from_string : ?size:int -> string -> t
+  val from_char   : ?size:int -> char -> t
+end
+
+(* -------------------------------------------------------------------- *)
+module Regexp : sig
+  include module type of Str
 end
 
 (* -------------------------------------------------------------------- *)
@@ -202,11 +218,13 @@ module List : sig
     val filter2   : ('a -> 'b -> bool) -> 'a list -> 'b list -> 'a list * 'b list
     val all2      : ('a -> 'b -> bool) -> 'a list -> 'b list -> bool
     val map_fold2 : ('a -> 'b -> 'c -> 'a * 'd) -> 'a -> 'b list -> 'c list -> 'a * 'd list
+    val prefix2   : 'a list -> 'b list -> ('a list * 'a list) * ('b list * 'b list)
   end
 
   include module type of Parallel
 
   (*------------------------------------------------------------------ *)
+  val mbfilter   : ('a -> bool) -> 'a list -> 'a list
   val fusion     : ('a -> 'a -> 'a) -> 'a list -> 'a list -> 'a list
   val is_unique  : ?eq:('a -> 'a -> bool) -> 'a list -> bool
   val fpick      : (unit -> 'a option) list -> 'a option
@@ -216,6 +234,13 @@ module List : sig
   val pmap       : ('a -> 'b option) -> 'a list -> 'b list
   val rev_pmap   : ('a -> 'b option) -> 'a list -> 'b list
   val rotate     : [`Left|`Right] -> int -> 'a list -> int * 'a list
+
+  (* ------------------------------------------------------------------ *)
+  val ksort:
+        ?stable:bool -> ?rev:bool
+     -> key:('a -> 'b)
+     -> cmp:('b -> 'b -> int) 
+     -> 'a list -> 'a list
 end
 
 (* -------------------------------------------------------------------- *)

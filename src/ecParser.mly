@@ -99,9 +99,6 @@
       pa_nosmt   = nosmt;
       pa_local   = local; }
 
-  let str_and = function `Asym -> "&&" | `Sym -> "/\\"
-  let str_or  = function `Asym -> "||" | `Sym -> "\\/"
-
   let mk_simplify l =
     if l = [] then
       { pbeta  = true; pzeta  = true;
@@ -166,6 +163,7 @@
 %token ADMIT
 %token ALGNORM
 %token ALIAS
+%token AMP
 %token APPLY
 %token AS
 %token ASSERT
@@ -195,7 +193,6 @@
 %token CONSEQ
 %token CONST
 %token CUT
-%token DCOLON
 %token DEBUG
 %token DECLARE
 %token DELTA
@@ -243,6 +240,7 @@
 %token IMPORT
 %token IMPOSSIBLE
 %token IN
+%token INCLUDE
 %token INLINE
 %token INSTANCE
 %token INTROS
@@ -332,6 +330,7 @@
 %token THEORY
 %token TICKPIPE
 %token TILD
+%token TIME
 %token TIMEOUT
 %token TOP
 %token TRANSITIVITY
@@ -347,7 +346,7 @@
 %token WITH
 %token WP
 %token ZETA
-%token <string> NOP OP1 OP2 OP3 OP4
+%token <string> NOP LOP1 ROP1 LOP2 ROP2 LOP3 ROP3 LOP4 ROP4
 %token LTCOLON GT LT GE LE
 
 %nonassoc prec_below_comma
@@ -365,15 +364,18 @@
 
 %nonassoc prec_below_order
 
-%left NOP
-%left GT LT GE LE
-%left OP1
+%left  NOP
+%left  GT LT GE LE
+%left  LOP1
+%right ROP1
 %right QUESTION
-%left OP2 MINUS ADD
+%left  LOP2 MINUS ADD
+%right ROP2
 %right RARROW
-%left OP3 STAR SLASH
-%left OP4 AT
-%right DCOLON
+%left  LOP3 STAR SLASH
+%right ROP3
+%left  LOP4 AT AMP
+%right ROP4
 
 %nonassoc LBRACE
 
@@ -381,8 +383,8 @@
 
 %nonassoc prec_tactic
 
-%type <EcParsetree.global EcLocation.located> global
-%type <EcParsetree.prog   EcLocation.located> prog
+%type <EcParsetree.global> global
+%type <EcParsetree.prog  > prog
 
 %start prog global
 %%
@@ -444,8 +446,6 @@ genqident(X):
 | x=PUNIOP        { x }
 | x=PBINOP        { x }
 
-| paren(DCOLON)   { EcCoreLib.s_cons }
-
 | x=loc(STRING)   {
     if not (EcCoreLib.is_mixfix_op (unloc x)) then
       parse_error x.pl_loc (Some "invalid mixfix operator");
@@ -494,19 +494,29 @@ fident:
 | LE { "<=" }
 
 %inline uniop:
-| x=OP2 { Printf.sprintf "[%s]" x }
 | x=NOP { Printf.sprintf "[%s]" x }
 | ADD   { "[+]" }
 | MINUS { "[-]" }
 
-(* -------------------------------------------------------------------- *)
-%inline or_:
-| ORA { `Asym }
-| OR  { `Sym  }
+%inline binop:
+| EQ    { "="   }
+| ADD   { "+"   }
+| MINUS { "-"   }
+| STAR  { "*"   }
+| SLASH { "/"   }
+| AT    { "@"   }
+| IMPL  { "=>"  }
+| IFF   { "<=>" }
+| OR    { "\\/" }
+| ORA   { "||"  }
+| AND   { "/\\" }
+| ANDA  { "&&"  }
+| AMP   { "&"   }
 
-%inline and_:
-| ANDA { `Asym }
-| AND  { `Sym  }
+| x=LOP1 | x=LOP2 | x=LOP3 | x=LOP4
+| x=ROP1 | x=ROP2 | x=ROP3 | x=ROP4
+| x=NOP
+    { x }
 
 (* -------------------------------------------------------------------- *)
 pside_:
@@ -624,59 +634,14 @@ expr_u:
 | e=expr_chained_orderings %prec prec_below_order
    { fst e }
 
-| e1=expr op=loc(NOP) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc op.pl_desc ti [e1; e2] }
-
-| e1=expr op=loc(EQ) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc "=" ti [e1; e2] }
-
 | e1=expr op=loc(NE) ti=tvars_app? e2=expr
     { peapp_symb op.pl_loc "[!]" None
       [ mk_loc op.pl_loc (peapp_symb op.pl_loc "=" ti [e1; e2])] }
 
-| e1=expr op=loc(ADD) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc "+" ti [e1; e2] }
-
-| e1=expr op=loc(MINUS) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc "-" ti [e1; e2] }
-
-| e1=expr op=loc(OP1) ti=tvars_app? e2=expr
+| e1=expr op=loc(binop) ti=tvars_app? e2=expr
     { peapp_symb op.pl_loc op.pl_desc ti [e1; e2] }
 
-| e1=expr op=loc(OP2) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc op.pl_desc ti [e1; e2] }
-
-| e1=expr op=loc(OP3) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc op.pl_desc ti [e1; e2] }
-
-| e1=expr op=loc(OP4) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc op.pl_desc ti [e1; e2] }
-
-| e1=expr op=loc(DCOLON) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc EcCoreLib.s_cons ti [e1; e2] }
-
-| e1=expr op=loc(IMPL) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc "=>" ti [e1; e2] }
-
-| e1=expr op=loc(IFF) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc "<=>" ti [e1; e2] }
-
-| e1=expr op=loc(or_) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc (str_or op.pl_desc) ti [e1; e2] }
-
-| e1=expr op=loc(and_) ti=tvars_app? e2=expr
-    { peapp_symb op.pl_loc (str_and op.pl_desc) ti [e1; e2] }
-
-| e1=expr op=loc(STAR) ti=tvars_app?  e2=expr
-    { peapp_symb op.pl_loc "*" ti [e1; e2] }
-
-| e1=expr op=loc(SLASH) ti=tvars_app?  e2=expr
-    { peapp_symb op.pl_loc "/" ti [e1; e2] }
-
-| e1=expr op=loc(AT) ti=tvars_app?  e2=expr
-    { peapp_symb op.pl_loc "@" ti [e1; e2] }
-
-| c=expr QUESTION e1=expr COLON e2=expr %prec OP2
+| c=expr QUESTION e1=expr COLON e2=expr %prec LOP2
    { PEif (c, e1, e2) }
 
 | IF c=expr THEN e1=expr ELSE e2=expr
@@ -712,7 +677,7 @@ expr_chained_orderings:
 | e1=loc(expr_chained_orderings) op=loc(ordering_op) ti=tvars_app? e2=expr
     { let (lce1, (e1, le)) = (e1.pl_loc, unloc e1) in
       let loc = EcLocation.make $startpos $endpos in
-        (peapp_symb loc (str_and `Asym) None
+        (peapp_symb loc "&&" None
            [EcLocation.mk_loc lce1 e1;
             EcLocation.mk_loc loc
               (peapp_symb op.pl_loc (unloc op) ti [le; e2])],
@@ -837,62 +802,17 @@ form_u(P):
 | op=loc(uniop) ti=tvars_app? e=form_r(P)
    { pfapp_symb op.pl_loc op.pl_desc ti [e] }
 
-| e1=form_r(P) op=loc(NOP) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc op.pl_desc ti [e1; e2] }
-
-| e1=form_r(P) op=loc(OP1) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc op.pl_desc ti [e1; e2] }
-
 | f=form_chained_orderings(P) %prec prec_below_order
     { fst f }
-
-| e1=form_r(P) op=loc(EQ) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc "=" ti [e1; e2] }
 
 | e1=form_r(P) op=loc(NE) ti=tvars_app? e2=form_r(P)
     { pfapp_symb op.pl_loc "[!]" None
       [ mk_loc op.pl_loc (pfapp_symb op.pl_loc "=" ti [e1; e2])] }
 
-| e1=form_r(P) op=loc(MINUS) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc "-" ti [e1; e2] }
-
-| e1=form_r(P) op=loc(ADD) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc "+" ti [e1; e2] }
-
-| e1=form_r(P) op=loc(OP2) ti=tvars_app? e2=form_r(P)
+| e1=form_r(P) op=loc(binop) ti=tvars_app? e2=form_r(P)
     { pfapp_symb op.pl_loc op.pl_desc ti [e1; e2] }
 
-| e1=form_r(P) op=loc(OP3) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc op.pl_desc ti [e1; e2] }
-
-| e1=form_r(P) op=loc(OP4) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc op.pl_desc ti [e1; e2] }
-
-| e1=form_r(P) op=loc(DCOLON) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc EcCoreLib.s_cons ti [e1; e2] }
-
-| e1=form_r(P) op=loc(IMPL) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc "=>" ti [e1; e2] }
-
-| e1=form_r(P) op=loc(IFF) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc "<=>" ti [e1; e2] }
-
-| e1=form_r(P) op=loc(or_) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc (str_or op.pl_desc) ti [e1; e2] }
-
-| e1=form_r(P) op=loc(and_) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc (str_and op.pl_desc) ti [e1; e2] }
-
-| e1=form_r(P) op=loc(STAR) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc "*" ti [e1; e2] }
-
-| e1=form_r(P) op=loc(SLASH) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc "/" ti [e1; e2] }
-
-| e1=form_r(P) op=loc(AT) ti=tvars_app? e2=form_r(P)
-    { pfapp_symb op.pl_loc "@" ti [e1; e2] }
-
-| c=form_r(P) QUESTION e1=form_r(P) COLON e2=form_r(P) %prec OP2
+| c=form_r(P) QUESTION e1=form_r(P) COLON e2=form_r(P) %prec LOP2
     { PFif (c, e1, e2) }
 
 | EQ LBRACE xs=plist1(qident_or_res_or_glob, COMMA) RBRACE
@@ -942,7 +862,7 @@ form_chained_orderings(P):
 | f1=loc(form_chained_orderings(P)) op=loc(ordering_op) ti=tvars_app? f2=form_r(P)
     { let (lcf1, (f1, le)) = (f1.pl_loc, unloc f1) in
       let loc = EcLocation.make $startpos $endpos in
-        (pfapp_symb loc (str_and `Asym) None
+        (pfapp_symb loc "&&" None
            [EcLocation.mk_loc lcf1 f1;
             EcLocation.mk_loc loc
               (pfapp_symb op.pl_loc (unloc op) ti [le; f2])],
@@ -1247,7 +1167,7 @@ signature_item:
 
 typaram:
 | x=tident { (x, []) }
-| x=tident LTCOLON tc=plist1(lqident, tcand) { (x, tc) }
+| x=tident LTCOLON tc=plist1(lqident, AMP) { (x, tc) }
 
 typarams:
 | empty { []  }
@@ -1257,12 +1177,9 @@ typarams:
 %inline tyd_name:
 | tya=typarams x=ident { (tya, x) }
 
-tcand:
-| x=loc(OP4) { if unloc x <> "&" then parse_error x.pl_loc None }
-
 dt_ctor_def:
 | x=oident { (x, []) }
-| x=oident OF ty=plist1(loc(simpl_type_exp), tcand) { (x, ty) }
+| x=oident OF ty=plist1(loc(simpl_type_exp), AMP) { (x, ty) }
 
 %inline datatype_def:
 | LBRACKET PIPE? ctors=plist1(dt_ctor_def, PIPE) RBRACKET { ctors }
@@ -1664,6 +1581,13 @@ gpterm_head(F):
 | LPAREN UNDERSCORE? COLON f=F RPAREN
    { FPCut f }
 
+gpoterm_head(F):
+| x=gpterm_head(F?)
+    { x }
+
+| UNDERSCORE
+    { FPCut None }
+
 gpterm_arg:
 | LPAREN LTCOLON m=loc(mod_qident) RPAREN
     { EA_mod m }
@@ -1683,8 +1607,15 @@ gpterm(F):
 | LPAREN hd=gpterm_head(F) args=loc(gpterm_arg)* RPAREN
    { mk_pterm hd args }
 
+gpoterm(F):
+| hd=gpoterm_head(F)
+   { mk_pterm hd [] }
+
+| LPAREN hd=gpoterm_head(F) args=loc(gpterm_arg)* RPAREN
+   { mk_pterm hd args }
+
 %inline pterm:
-| pt=gpterm(form) { pt }
+| pt=gpoterm(form) { pt }
 
 %inline epterm:
 | x=iboption(AT) pt=pterm
@@ -1760,10 +1691,10 @@ genpattern:
     { `Form (Some (snd_map EcMaps.Sint.of_list o), l) }
 
 | LPAREN UNDERSCORE COLON f=form RPAREN
-    { `ProofTerm (mk_pterm (FPCut f) []) }
+    { `ProofTerm (mk_pterm (FPCut (Some f)) []) }
 
 | LPAREN LPAREN UNDERSCORE COLON f=form RPAREN args=loc(gpterm_arg)* RPAREN
-    { `ProofTerm (mk_pterm (FPCut f) args) }
+    { `ProofTerm (mk_pterm (FPCut (Some f)) args) }
 
 simplify_arg:
 | DELTA l=qoident* { `Delta l }
@@ -1931,8 +1862,8 @@ logtactic:
 | TRIVIAL
    { Ptrivial }
 
-| SMT db=dbhint pi=prover_info
-   { Psmt (Some db, pi) }
+| SMT v=option(prefix(COLON, lident)) db=dbhint pi=prover_info
+   { Psmt (Some db, pi, v) }
 
 | INTROS a=intro_pattern*
    { Pintro a }
@@ -2523,32 +2454,33 @@ proofmodename:
 
 theory_clone:
 | local=boption(LOCAL) CLONE options=clone_opts?
-    ip=import_flag? x=uqident
+    ip=clone_import? x=uqident
     cw=clone_with? cp=clone_proof?
 
-   { let oth =
-       { pthc_base  = x;
-         pthc_name  = None;
-         pthc_ext   = EcUtils.odfl [] cw;
-         pthc_prf   = EcUtils.odfl [] cp;
-         pthc_opts  = odfl [] options;
-         pthc_local = local; }
-     in
-       (oth, ip) }
+   { { pthc_base   = x;
+       pthc_name   = None;
+       pthc_ext    = EcUtils.odfl [] cw;
+       pthc_prf    = EcUtils.odfl [] cp;
+       pthc_opts   = odfl [] options;
+       pthc_local  = local;
+       pthc_import = ip; } }
 
 | local=boption(LOCAL) CLONE options=clone_opts?
-    ip=import_flag? x=uqident AS y=uident
+    ip=clone_import? x=uqident AS y=uident
     cw=clone_with? cp=clone_proof?
 
-   { let oth =
-       { pthc_base  = x;
-         pthc_name  = Some y;
-         pthc_ext   = EcUtils.odfl [] cw;
-         pthc_prf   = EcUtils.odfl [] cp;
-         pthc_opts  = odfl [] options;
-         pthc_local = local; }
-     in
-       (oth, ip) }
+   { { pthc_base   = x;
+       pthc_name   = Some y;
+       pthc_ext    = EcUtils.odfl [] cw;
+       pthc_prf    = EcUtils.odfl [] cp;
+       pthc_opts   = odfl [] options;
+       pthc_local  = local;
+       pthc_import = ip; } }
+
+clone_import:
+| EXPORT  { `Export  }
+| IMPORT  { `Import  }
+| INCLUDE { `Include }
 
 clone_opt:
 | b=boption(MINUS) ABSTRACT { (not b, `Abstract) }
@@ -2708,7 +2640,7 @@ addrw:
 (* -------------------------------------------------------------------- *)
 (* Global entries                                                       *)
 
-global_:
+global_action:
 | theory_open      { GthOpen      $1 }
 | theory_close     { GthClose     $1 }
 | theory_require   { GthRequire   $1 }
@@ -2738,8 +2670,8 @@ global_:
 | SEARCH x=search+ { Gsearch    x   }
 
 | PRAGMA       x=pragma { Gpragma x }
-| PRAGMA ADD   x=lident { Goption (x, true ) }
-| PRAGMA MINUS x=lident { Goption (x, false) }
+| PRAGMA ADD   x=pragma { Goption (x, true ) }
+| PRAGMA MINUS x=pragma { Goption (x, false) }
 
 pragma_r:
 | x=LIDENT { x }
@@ -2753,7 +2685,8 @@ stop:
 | DROP DOT { }
 
 global:
-| g=loc(global_) FINAL { g }
+| tm=boption(TIME) g=loc(global_action) FINAL
+  { { gl_action = g; gl_timed = tm; } }
 
 prog_r:
 | g=global { P_Prog ([g], false) }

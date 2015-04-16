@@ -1163,7 +1163,7 @@ module Memory = struct
   let lookup (g : int) (me : symbol) (env : env) =
     let mems = MMsym.all me env.env_memories in
       try  Some (List.nth mems g)
-      with Failure _ -> None
+      with Invalid_argument _ -> None
 
   let set_active (me : memory) (env : env) =
     match byid me env with
@@ -1370,6 +1370,13 @@ module Ty = struct
     match ty.ty_node with
     | Tconstr (p, tys) when defined p env -> hnorm (unfold p tys env) env
     | _ -> ty
+
+  let signature env =
+    let rec doit acc ty =
+      match (hnorm ty env).ty_node with
+      | Tfun (dom, codom) -> doit (dom::acc) codom
+      | _ -> (List.rev acc, ty)
+    in fun ty -> doit [] ty
 
   let scheme_of_ty mode (ty : ty) (env : env) =
     let ty = hnorm ty env in
@@ -2476,8 +2483,10 @@ module Op = struct
     let op = oget (by_path_opt p env) in
     let f  =
       match op.op_kind with
-      | OB_oper (Some (OP_Plain e)) -> EcCoreFol.form_of_expr EcCoreFol.mhr e
-      | OB_pred (Some idsf) -> idsf
+      | OB_oper (Some (OP_Plain e)) ->
+          form_of_expr EcCoreFol.mhr e
+      | OB_pred (Some idsf) ->
+          idsf
       | _ -> raise NotReducible
     in
       EcCoreFol.Fsubst.subst_tvar

@@ -60,6 +60,9 @@ val check_state : topmode -> string -> scope -> unit
 module Options : sig
   val set_implicits : scope -> bool -> scope
   val get_implicits : scope -> bool
+
+  val set_smtversion : scope -> EcHiGoal.smtversion -> scope
+  val get_smtversion : scope -> EcHiGoal.smtversion
 end
 
 (* -------------------------------------------------------------------- *)
@@ -176,11 +179,7 @@ end
 
 (* -------------------------------------------------------------------- *)
 module Cloning : sig
-  (* [clone scope (src, dst)] finds and clones theory [src] in
-   * scope [scope]. Cloned theory name is [dst] if not None. If
-   * [dst] is None, the basename of [src] is used as the cloned
-   * theory name. *)
-  val clone : scope -> Ax.mode -> theory_cloning -> symbol * scope
+  val clone : scope -> Ax.mode -> theory_cloning -> scope
 end
 
 (* -------------------------------------------------------------------- *)

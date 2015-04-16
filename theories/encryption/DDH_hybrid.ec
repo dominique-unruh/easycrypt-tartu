@@ -1,6 +1,6 @@
 (* --------------------------------------------------------------------
  * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Distributed under the terms of the CeCILL-B licence.
  * -------------------------------------------------------------------- *)
 
 require import Real.
@@ -66,11 +66,11 @@ section.
  
   lemma Hybrid:
     forall &m,
-      Pr[Ln(DDHb, B(A)).main(tt) @ &m : (res /\ LRB.l <= n) /\ C.c <= 1 ] -
-      Pr[Rn(DDHb, B(A)).main(tt) @ &m : (res /\ LRB.l <= n) /\ C.c <= 1 ] = 
+      Pr[Ln(DDHb, B(A)).main() @ &m : (res /\ LRB.l <= n) /\ C.c <= 1 ] -
+      Pr[Rn(DDHb, B(A)).main() @ &m : (res /\ LRB.l <= n) /\ C.c <= 1 ] = 
       1%r / n%r *
-       (Pr[Ln(DDHb, A).main(tt) @ &m : (res /\ C.c <= n) ] -
-        Pr[Rn(DDHb, A).main(tt) @ &m :  (res /\ C.c <= n) ]).
+       (Pr[Ln(DDHb, A).main() @ &m : (res /\ C.c <= n) ] -
+        Pr[Rn(DDHb, A).main() @ &m :  (res /\ C.c <= n) ]).
   proof. 
    intros &m.
    apply (H.Hybrid (<:DDHb) (<:A) _ _ _ _ &m 

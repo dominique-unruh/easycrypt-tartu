@@ -175,6 +175,26 @@ module Implicits = struct
 end
 
 (* -------------------------------------------------------------------- *)
+module SmtVersion = struct
+  exception SmtVersion of EcHiGoal.smtversion
+
+  let implicits =
+    let default = SmtVersion `Full in
+    let for_loading = function
+      | SmtVersion _ -> default
+      | exn          -> exn
+    in GenOptions.register { for_loading } default
+
+  let set options value =
+    GenOptions.set options implicits (SmtVersion value)
+
+  let get options =
+    match GenOptions.get options implicits with
+    | SmtVersion value -> value
+    | _ -> assert false
+end
+
+(* -------------------------------------------------------------------- *)
 type proof_uc = {
   puc_active : proof_auc option;
   puc_cont   : proof_ctxt list * (EcEnv.env option);
@@ -295,6 +315,12 @@ module Options = struct
 
   let set_implicits scope value =
     { scope with sc_options = Implicits.set scope.sc_options value }
+
+  let get_smtversion scope =
+    SmtVersion.get scope.sc_options
+
+  let set_smtversion scope value =
+    { scope with sc_options = SmtVersion.set scope.sc_options value }
 end
 
 (* -------------------------------------------------------------------- *)
@@ -508,9 +534,10 @@ module Tactics = struct
         in
 
         let ttenv = {
-          EcHiGoal.tt_provers   = pi scope;
-          EcHiGoal.tt_smtmode   = htmode;
-          EcHiGoal.tt_implicits = Options.get_implicits scope; } in
+          EcHiGoal.tt_provers    = pi scope;
+          EcHiGoal.tt_smtmode    = htmode;
+          EcHiGoal.tt_implicits  = Options.get_implicits  scope;
+          EcHiGoal.tt_smtversion = Options.get_smtversion scope; } in
 
         let juc   = TTC.process ttenv tac juc in
         let pac   = { pac with puc_jdg = PSCheck juc } in
@@ -645,7 +672,7 @@ module Ax = struct
           match tc with
           | Some tc -> tc
           | None    ->
-              let dtc = Plogic (Psmt (None, empty_pprover)) in
+              let dtc = Plogic (Psmt (None, empty_pprover, None)) in
               let dtc = { pl_loc = loc; pl_desc = dtc } in
               let dtc = { pt_core = dtc; pt_intros = []; } in
                 dtc
@@ -1871,14 +1898,20 @@ module Cloning = struct
     let (name, (opath, oth), ovrds) = C.clone scope.sc_env thcl in
     let ovrds = { ovre_ovrd  = ovrds;
                   ovre_scope = { ovrc_glproof = None}; } in
-
+    let incl  = thcl.pthc_import = Some `Include in
     let opts  = Options.merge Options.default thcl.pthc_opts in
+
+    if thcl.pthc_import = Some `Include && opts.clo_abstract then
+      hierror "cannot include an abstract theory";
+    if thcl.pthc_import = Some `Include && EcUtils.is_some thcl.pthc_name then
+      hierror "cannot give an alias to an included clone";
+
     let cpath = EcEnv.root scope.sc_env in
-    let npath = EcPath.pqname cpath name in
+    let npath = if incl then cpath else EcPath.pqname cpath name in
     let subst = EcSubst.add_path EcSubst.empty opath npath in
 
     let (proofs, scope) =
-      let rec ovr1 prefix (ovrds : ovrenv) (subst, ops, proofs, scope) item =
+      let rec ovr1 prefix abstract (ovrds : ovrenv) (subst, ops, proofs, scope) item =
         let xpath x = EcPath.pappend opath (EcPath.fromqsymbol (prefix, x)) in
 
         let myovscope = {
@@ -2038,6 +2071,7 @@ module Cloning = struct
         | CTh_axiom (x, ax) -> begin
             let ax = EcSubst.subst_ax subst ax in
             let (ax, proofs) =
+              if abstract then (ax, proofs) else
               let doproof =
                 match ax.ax_kind with
                 | `Lemma -> None
@@ -2075,9 +2109,10 @@ module Cloning = struct
                              ovre_scope = myovscope; } in
             let (subst, ops, proofs, subscope) =
               let subscope = Theory.enter scope thmode x in
+              let abstract = abstract || (thmode = `Abstract) in
               let (subst, ops, proofs, subscope) =
                 List.fold_left
-                  (ovr1 (prefix @ [x]) subovrds)
+                  (ovr1 (prefix @ [x]) abstract subovrds)
                   (subst, ops, proofs, subscope) cth.cth_struct
               in
                 (subst, ops, proofs, snd (Theory.exit subscope))
@@ -2178,13 +2213,13 @@ module Cloning = struct
   
       in
         let mode  = if opts.clo_abstract then `Abstract else `Concrete in
-        let scope = Theory.enter scope mode name in
+        let scope = if incl then scope else Theory.enter scope mode name in
         let _, _, proofs, scope =
-          List.fold_left (ovr1 [] ovrds)
+          List.fold_left (ovr1 [] opts.clo_abstract ovrds)
             (subst, Mp.empty, [], scope)
             (fst oth).cth_struct
         in
-          (List.rev proofs, snd (Theory.exit scope))
+          (List.rev proofs, if incl then scope else snd (Theory.exit scope))
     in
 
     let proofs = List.pmap (fun axc ->
@@ -2210,7 +2245,13 @@ module Cloning = struct
 
     let scope = Ax.add_for_cloning scope proofs in
 
-    (name, scope)
+    thcl.pthc_import |> ofold (fun flag scope ->
+      match flag with
+      | `Import  -> { scope with sc_env = EcEnv.Theory.import npath scope.sc_env; }
+      | `Export  -> { scope with sc_env = EcEnv.Theory.export npath scope.sc_env; }
+      | `Include -> scope)
+      scope
+
 end
 
 (* -------------------------------------------------------------------- *)

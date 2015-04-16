@@ -82,6 +82,11 @@ module EqTest = struct
     | _, _ -> false
 
   (* ------------------------------------------------------------------ *)
+  let is_unit env ty = for_type env tunit ty
+  let is_bool env ty = for_type env tbool ty
+  let is_int  env ty = for_type env tint  ty
+
+  (* ------------------------------------------------------------------ *)
   let for_type_exn env t1 t2 =
     if not (for_type env t1 t2) then
       raise (IncompatibleType (env, (t1, t2)))
@@ -242,8 +247,8 @@ let is_record env f =
 let rec h_red ri env hyps f =
   match f.f_node with
     (* β-reduction *)
-  | Fapp ({ f_node = Fquant (Llambda, bds, body)}, args) when ri.beta ->
-      f_betared_simpl bds body args f.f_ty
+  | Fapp ({ f_node = Fquant (Llambda, _, _)}, _) when ri.beta ->
+      f_betared f
 
     (* ζ-reduction *)
   | Flocal x -> reduce_local ri hyps x

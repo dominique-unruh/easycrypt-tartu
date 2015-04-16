@@ -1,6 +1,6 @@
 (* --------------------------------------------------------------------
  * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Distributed under the terms of the CeCILL-B licence.
  * -------------------------------------------------------------------- *)
 
 (* A theory of polymorphic arrays. *)
@@ -68,7 +68,7 @@ by intros=> xs_0; apply array_ext; split;
 qed.
 
 (* cons *)
-op "_::_" : 'x -> 'x array -> 'x array.
+op (::) : 'x -> 'x array -> 'x array.
 
 axiom length_cons (x:'x) (xs:'x array):
   length (x::xs) = 1 + length xs.

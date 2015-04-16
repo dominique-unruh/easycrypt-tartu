@@ -342,14 +342,14 @@ type ppt_arg =
   | EA_form  of pformula
   | EA_mem   of pmemory
   | EA_mod   of pmsymbol located
-  | EA_proof of pformula gppterm
+  | EA_proof of (pformula option) gppterm
 
 and 'a gppterm = {
   fp_head : 'a ppt_head;
   fp_args : ppt_arg located list
 }
 
-type ppterm  = pformula gppterm
+type ppterm  = (pformula option) gppterm
 type eppterm = [`Implicit | `Explicit] * ppterm
 
 type pcutdef = {
@@ -610,7 +610,7 @@ type apply_info = [
 type logtactic =
   | Preflexivity
   | Passumption
-  | Psmt        of (pdbhint option * pprover_infos)
+  | Psmt        of (pdbhint option * pprover_infos * psymbol option)
   | Pintro      of intropattern
   | Psplit
   | Pfield	    of psymbol list
@@ -768,12 +768,13 @@ type w3_renaming =
 
 (* -------------------------------------------------------------------- *)
 type theory_cloning = {
-  pthc_base  : pqsymbol;
-  pthc_name  : psymbol option;
-  pthc_ext   : (pqsymbol * theory_override) list;
-  pthc_prf   : theory_cloning_proof list;
-  pthc_opts  : theory_cloning_options;
-  pthc_local : bool;
+  pthc_base   : pqsymbol;
+  pthc_name   : psymbol option;
+  pthc_ext    : (pqsymbol * theory_override) list;
+  pthc_prf    : theory_cloning_proof list;
+  pthc_opts   : theory_cloning_options;
+  pthc_local  : bool;
+  pthc_import : [`Export | `Import | `Include] option;
 }
 
 and theory_cloning_option =
@@ -818,7 +819,7 @@ type proofmode = {
 }
 
 (* -------------------------------------------------------------------- *)
-type global =
+type global_action =
   | Gdeclare     of pdeclare
   | Gmodule      of pmodule_def
   | Ginterface   of (psymbol * pmodule_sig)
@@ -837,7 +838,7 @@ type global =
   | GthRequire   of (psymbol list * [`Import|`Export] option)
   | GthImport    of pqsymbol list
   | GthExport    of pqsymbol list
-  | GthClone     of (theory_cloning * [`Import|`Export] option)
+  | GthClone     of theory_cloning
   | GthW3        of (string list * string * w3_renaming list)
   | GsctOpen     of psymbol option
   | GsctClose    of psymbol option
@@ -848,6 +849,13 @@ type global =
   | Gpragma      of psymbol
   | Goption      of (psymbol * bool)
 
-type prog =
-  | P_Prog of (global located) list * bool
+type global = {
+  gl_action : global_action located;
+  gl_timed  : bool;
+}
+
+type prog_r =
+  | P_Prog of global list * bool
   | P_Undo of int
+
+type prog = prog_r located

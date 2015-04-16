@@ -347,7 +347,17 @@ let rec run_prover ?(notify : notify option) (pi : prover_infos) (prover : strin
         try  Driver.prove_task ~command ?timelimit dr task ()
         with Unix.Unix_error (Unix.ENOMEM, "fork", _) when not gcdone ->
           Gc.compact (); doit true
-      in doit false
+      in
+
+      if EcUtils.is_some (Os.getenv "EC_SMT_DEBUG") then begin
+        let stream = open_out (Printf.sprintf "%s.smt" prover) in
+        let fmt = Format.formatter_of_out_channel stream in
+        EcUtils.try_finally
+          (fun () -> Format.fprintf fmt "%a@." (Driver.print_task dr) task)
+          (fun () -> close_out stream)
+      end;
+
+      doit false
 
     in
       Some (prover, pc)

@@ -47,6 +47,7 @@ type apperror = [
   | `MemoryWanted
   | `ModuleWanted
   | `PTermWanted
+  | `CannotInfer
   | `CannotInferMod
   | `NotFunctional
   | `InvalidArgForm
@@ -63,6 +64,7 @@ let tc_pterm_apperror pte ?loc (kind : apperror) =
     | `MemoryWanted    -> Format.fprintf fmt "%s" "expecting a memory"
     | `ModuleWanted    -> Format.fprintf fmt "%s" "expecting a module expression"
     | `PTermWanted     -> Format.fprintf fmt "%s" "expecting a proof-term"
+    | `CannotInfer     -> Format.fprintf fmt "%s" "cannot infer this place-holder"
     | `CannotInferMod  -> Format.fprintf fmt "%s" "cannot infer module arguments"
     | `NotFunctional   -> Format.fprintf fmt "%s" "too many argument"
     | `InvalidArgForm  -> Format.fprintf fmt "%s" "invalid argument (incompatible type)"
@@ -316,7 +318,7 @@ let lookup_named_psymbol (hyps : LDecl.hyps) ~hastyp fp =
  * formula with holes by annotating it with an empty {} occurences
  * selector *)
 
-let ffpattern_of_form hyps fp =
+let ffpattern_of_form hyps fp : ppterm option =
   let rec destr_app fp =
     match unloc fp with
     | PFtuple [fp] -> destr_app fp
@@ -390,8 +392,11 @@ let process_pterm_cut ~prcut pe pt =
 
 (* ------------------------------------------------------------------ *)
 let process_pterm pe pt =
-  let prcut = PT.pf_process_formula pe.pte_pe pe.pte_hy in
-  process_pterm_cut prcut pe pt
+  let prcut fp =
+    match fp with
+    | None    -> tc_pterm_apperror pe `CannotInfer
+    | Some fp -> PT.pf_process_formula pe.pte_pe pe.pte_hy fp
+  in process_pterm_cut prcut pe pt
 
 (* ------------------------------------------------------------------ *)
 let rec trans_pterm_arg_impl pe f =
@@ -564,7 +569,7 @@ and apply_pterm_to_oarg ?loc ({ ptev_env = pe; ptev_pt = rawpt; } as pt) oarg =
             match dfl_arg_for_impl pe f1 oarg with
             | PVASub arg -> begin
               try
-                pf_form_match pe ~ptn:f1 arg.ptev_ax;
+                pf_form_match ~mode:EcMatching.fmdelta pe ~ptn:f1 arg.ptev_ax;
                 (f2, PASub (Some arg.ptev_pt))
               with EcMatching.MatchFailure ->
                 tc_pterm_apperror ?loc pe (`InvalidArgProof f1)
@@ -625,7 +630,9 @@ and process_full_pterm ?(implicits = false) pe pf =
     let isform   = function PAFormula _ -> true | _ -> false in
     let isglobal = function PTGlobal  _ -> true | _ -> false in
 
-    if List.for_all isform pt.ptev_pt.pt_args && isglobal pt.ptev_pt.pt_head
+    if    List.for_all isform pt.ptev_pt.pt_args
+       && not (List.is_empty pf.fp_args)
+       && isglobal pt.ptev_pt.pt_head
     then apply pt else pt
 
   in process_pterm_args_app ~implicits pt pf.fp_args
