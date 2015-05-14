@@ -83,6 +83,16 @@ lemma in_setD (s1 s2 : 'a fset):
 proof. by move=> x; rewrite setDE mem_oflist mem_filter /predC !memE. qed.
 
 (* -------------------------------------------------------------------- *)
+op filter ['a] (p : 'a -> bool) (s : 'a fset) =
+  oflist (filter p (elems s))
+  axiomatized by filterE.
+
+(* -------------------------------------------------------------------- *)
+lemma in_filter (p : 'a -> bool) (s : 'a fset):
+  forall x, mem (filter p s) x <=> p x /\ mem s x.
+proof. by move=> x; rewrite filterE mem_oflist mem_filter memE. qed.
+
+(* -------------------------------------------------------------------- *)
 pred (<=) (s1 s2 : 'a fset) = mem s1 <= mem s2.
 pred (< ) (s1 s2 : 'a fset) = mem s1 <  mem s2.
 
@@ -97,6 +107,12 @@ proof.
   by rewrite setP !subsetE; rewrite (subpred_eqP (mem A) (mem B)).
 qed.
 
+(* -------------------------------------------------------------------- *)
+lemma nosmt cards0: card set0<:'a> = 0.
+proof. by rewrite cardE set0E -(perm_eq_size (undup [])) 1:oflistK. qed.
+
+lemma nosmt card_ge0 (A : 'a fset) : Int.(<=) 0 (card A).
+proof. by rewrite cardE size_ge0. qed.
 
 (* -------------------------------------------------------------------- *)
 (* All the following proofs should be translated automagically          *)

@@ -37,7 +37,7 @@ via the opam OCaml packages manager.
 
   1. Add the EasyCrypt repository:
 
-        $> opam repository add easycrypt https://ci.easycrypt.info/opam-1.2.0
+        $> opam repository add easycrypt git://github.com/EasyCrypt/opam.git
         $> opam update
         
   2. Add the EasyCrypt meta-packages:
@@ -65,6 +65,7 @@ Opam can be easily installed from source or via your packages manager:
         LDFLAGS="-L/usr/local/lib"
 
 See [https://opam.ocaml.org/doc/Install.html] for how to install opam.
+
 See [https://opam.ocaml.org/doc/Usage.html] for how to initialize opam
 
 
@@ -125,6 +126,9 @@ We do NOT provide an automated way to install provers.
 
 
 ### On Win32
+
+WARNING: wodi is no more maintained. We are thinking on a new
+way of installing EasyCrypt requirements on Windows.
 
 WARNING: the instructions are given for the 32bit version of
 cygwin. Replace 32- by 64- if you are using the 64bit version.
