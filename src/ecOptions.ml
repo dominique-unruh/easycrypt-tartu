@@ -26,7 +26,6 @@ and cmp_option = {
 
 and cli_option = {
   clio_emacs   : bool;
-  clio_webui   : bool;
   clio_provers : prv_options;
 }
 
@@ -38,6 +37,8 @@ and prv_options = {
   prvo_pragmas   : string list;
   prvo_checkall  : bool;
   prvo_profile   : bool;
+  prvo_oldsmt    : bool;
+  prvo_iterate   : bool;
 }
 
 and ldr_options = {
@@ -221,8 +222,7 @@ let specs = {
     ("cli", "Run EasyCrypt top-level", [
       `Group "loader";
       `Group "provers";
-      `Spec  ("emacs", `Flag, "Output format set to <emacs>");
-      `Spec  ("webui", `Flag, "Output format set to <webui>")]);
+      `Spec  ("emacs", `Flag, "Output format set to <emacs>")]);
 
     ("config", "Print EasyCrypt configuration", [])
   ];
@@ -235,7 +235,11 @@ let specs = {
       `Spec ("cpu-factor" , `Int   , "Set the timeout CPU factor");
       `Spec ("check-all"  , `Flag  , "Force checking all files");
       `Spec ("pragmas"    , `String, "Comma-separated list of pragmas");
-      `Spec ("profile"    , `Flag  , "Collect some profiling informations")]);
+      `Spec ("profile"    , `Flag  , "Collect some profiling informations");
+      `Spec ("old-smt"    , `Flag  , "Force to use old version of smt");
+      `Spec ("iterate"    , `Flag  , "Force to iterate smt call");
+    ]);
+       
 
     ("loader", "Options related to loader", [
       `Spec ("I"   , `String, "Add <dir> to the list of include directories");
@@ -301,11 +305,13 @@ let prv_options_of_values values =
       prvo_provers   = provers;
       prvo_pragmas   = get_string_list "pragmas" values;
       prvo_checkall  = get_flag "check-all" values;
-      prvo_profile   = get_flag "profile" values; }
+      prvo_profile   = get_flag "profile" values;
+      prvo_oldsmt    = get_flag "old-smt" values;
+      prvo_iterate   = get_flag "iterate" values;
+    }
 
 let cli_options_of_values values =
   { clio_emacs   = get_flag "emacs" values;
-    clio_webui   = get_flag "webui" values;
     clio_provers = prv_options_of_values values; }
 
 let cmp_options_of_values values input =

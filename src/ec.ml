@@ -224,18 +224,18 @@ let _ =
 
     | `Cli cliopts -> begin
         let terminal =
-          match (cliopts.clio_emacs, cliopts.clio_webui) with
-          | (true, false)  -> lazy (EcTerminal.from_emacs ())
-          | (false, true)  -> lazy (EcTerminal.from_webui ())
-          | (_, _) -> lazy (EcTerminal.from_tty ())
-        in
-          (cliopts.clio_provers, None, terminal, true)
+          if   cliopts.clio_emacs
+          then lazy (EcTerminal.from_emacs ())
+          else lazy (EcTerminal.from_tty ())
+
+        in (cliopts.clio_provers, None, terminal, true)
     end
 
     | `Compile cmpopts -> begin
         let input = cmpopts.cmpo_input in
         let terminal = lazy (EcTerminal.from_channel ~name:input (open_in input)) in
-          (cmpopts.cmpo_provers, Some input, terminal, false)
+        ({cmpopts.cmpo_provers with prvo_iterate = true}, 
+         Some input, terminal, false)
     end
   in
 
@@ -256,6 +256,8 @@ let _ =
       EcCommands.cm_provers   = prvopts.prvo_provers;
       EcCommands.cm_wrapper   = pwrapper;
       EcCommands.cm_profile   = prvopts.prvo_profile;
+      EcCommands.cm_oldsmt    = prvopts.prvo_oldsmt;
+      EcCommands.cm_iterate   = prvopts.prvo_iterate;
     } in
 
     EcCommands.initialize ~undo:interactive ~boot:ldropts.ldro_boot ~checkmode

@@ -22,7 +22,6 @@ and cmp_option = {
 
 and cli_option = {
   clio_emacs   : bool;
-  clio_webui   : bool;
   clio_provers : prv_options;
 }
 
@@ -34,6 +33,8 @@ and prv_options = {
   prvo_pragmas   : string list;
   prvo_checkall  : bool;
   prvo_profile   : bool;
+  prvo_oldsmt    : bool;
+  prvo_iterate   : bool;
 }
 
 and ldr_options = {
