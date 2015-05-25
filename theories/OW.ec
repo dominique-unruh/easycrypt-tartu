@@ -26,11 +26,11 @@ op challenge: pkey -> t distr.
 
 axiom challengeL pk:
   valid_pkey pk =>
-  mu (challenge pk) True = 1%r.
+  mu (challenge pk) predT = 1%r.
 
 axiom challengeU pk:
   valid_pkey pk =>
-  isuniform (challenge pk).
+  is_subuniform (challenge pk).
 
 (** Concrete definitions *)
 op f: pkey -> t -> t.

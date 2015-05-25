@@ -582,7 +582,7 @@ theory Darray.
   proof strict.
   rewrite /mu_x=> len_neg; case (x = empty).
     by intros=> ->; rewrite mu_neg.
-    by rewrite mu_neg // /charfun -neqF=> ->.
+    by rewrite mu_neg// /charfun pred1E=> ->.
   qed.
 
   lemma supp_neg (len:int) (d:'a distr) (x:'a array):
@@ -650,6 +650,6 @@ theory Darray.
      (but we need to know that it is only applied to elements of d's support,
       which justifies leaving it as an axiom for now) *)
   axiom uniform (d:'a distr) len:
-    isuniform d =>
-    isuniform (darray len d).
+    is_uniform d =>
+    is_uniform (darray len d).
 end Darray.

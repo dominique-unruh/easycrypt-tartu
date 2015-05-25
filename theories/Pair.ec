@@ -36,7 +36,7 @@ theory Dprod.
      mu_x (d1 * d2) p = mu_x d1 (fst p) * mu_x d2 (snd p).
   proof strict.
   do 3!rewrite /mu_x; rewrite -mu_def.
-  by apply mu_eq => x;smt.
+  by apply mu_eq; rewrite pred1E => x;smt.
   qed.
 
   lemma supp_def (d1:'a distr) (d2:'b distr) p:
@@ -61,10 +61,11 @@ theory Dprod.
   qed.
 
   lemma dprodU (d1:'a distr) (d2:'b distr): 
-     isuniform d1 => isuniform d2 => isuniform (d1 * d2).
+     is_uniform d1 => is_uniform d2 => is_uniform (d1 * d2).
   proof strict.
-  intros Hd1 Hd2 x y; rewrite ?supp_def ?mu_x_def=> [Hx1 Hx2] [Hy1 Hy2].
-  by rewrite (Hd1 _ (fst y)) // (Hd2 _ (snd y)).
+    move=> [Hd1_supp Hd1_suf] [Hd2_supp Hd2_suf]; split; [smt|move=> x y].
+    rewrite /support !supp_def -!/(mu_x _ _) !mu_x_def=> [Hx1 Hx2] [Hy1 Hy2].
+    by rewrite (Hd1_suf (fst x) (fst y)) // (Hd2_suf (snd x) (snd y)).
   qed.
 
   theory Sample.
@@ -94,12 +95,12 @@ theory Dprod.
      cut ->: Pr[S.sample() @ &m1: a = res] = mu (d1*d2) ((=) a).
       byphoare (_: true ==> a = res)=> //.
       by proc; rnd; skip; rewrite eqL.
-     apply eq_sym; cut := mu_x_def d1 d2 a. rewrite /mu_x => ->.
+     apply eq_sym; cut := mu_x_def d1 d2 a. rewrite /mu_x pred1E=> ->.
      elim /tuple2_ind a => a a1 a2 _;rewrite /fst /snd /=.
      byphoare (_: true ==>  a1 = res.`1 /\ a2 = res.`2) => //;last by smt.
      proc; seq 1 : (a1 = r1) (mu_x d1 a1) (mu_x d2 a2) _ 0%r true => //.
-       by rnd ((=) a1);auto.
-       by rnd ((=) a2);auto.
+       by rnd ((=) a1); auto; rewrite -(pred1E a1).
+       by rnd ((=) a2); auto; rewrite -(pred1E a2).
      hoare;auto;smt.
     qed.
 

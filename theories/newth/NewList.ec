@@ -67,6 +67,12 @@ lemma behead_cons (x : 'a) xs: behead (x :: xs) = xs.
 proof. by []. qed.
 
 (* -------------------------------------------------------------------- *)
+lemma head_behead (xs : 'a list) z0:
+  xs <> [] =>
+  (head z0 xs) :: (behead xs) = xs.
+proof. by elim xs. qed.
+
+(* -------------------------------------------------------------------- *)
 (*                    Sequence catenation "cat"                         *)
 (* -------------------------------------------------------------------- *)
 op (++) (s1 s2 : 'a list) =
@@ -200,6 +206,14 @@ lemma mem_behead (s : 'a list):
   forall x, mem (behead s) x => mem s x.
 proof. by move=> x; case: s => //= y s ->. qed.
 
+lemma mem_head_behead z0 (s : 'a list):
+  s <> [] =>
+  forall x, (x = (head z0 s) \/ mem (behead s) x) <=> mem s x.
+proof.
+  move=> /head_behead h; rewrite -(h z0) head_cons behead_cons.
+  by move=> x; rewrite in_cons.
+qed.
+
 lemma mem_seq1 (x y : 'a): mem [y] x <=> (x = y).
 proof. by []. qed.
 
@@ -275,9 +289,9 @@ lemma filter_predT (s : 'a list): filter predT s = s.
 proof. by elim s => //= x s ->. qed.
 
 lemma filter_predI (p1 p2 : 'a -> bool) (s : 'a list):
-  filter (p1 /\ p2) s = filter p1 (filter p2 s).
+  filter (predI p1 p2) s = filter p1 (filter p2 s).
 proof.
-  elim s => //= x s IHs; rewrite IHs /Pred.(/\).
+  elim s => //= x s IHs; rewrite IHs /predI.
   by case (p2 x) => //=; case (p1 x) => //=.
 qed.
 
@@ -1029,7 +1043,7 @@ lemma map_comp (f1 : 'b -> 'c) (f2 : 'a -> 'b) s:
   map (f1 \o f2) s = map f1 (map f2 s).
 proof. by elim: s => //= x s ->. qed.
 
-lemma map_id (s : 'a list): map id s = s.
+lemma map_id (s : 'a list): map idfun s = s.
 proof. by elim: s => //= x s ->. qed.
 
 lemma id_map f (s : 'a list): (forall x, f x = x) => map f s = s.
@@ -1449,14 +1463,14 @@ theory Array.
     xs.[n <- a].[n'] = if n' = n then a else xs.[n'].
   proof.
     move=> n_bounds.
-    rewrite !getE; elim xs n n_bounds n'=> //=;smt.
-(*      smt.
+    rewrite !getE; elim xs n n_bounds n'=> //=.
+      smt.
     move=> x xs ih n n_bounds n'.
     case (n = 0)=> //= [->> | ].
       by case (n' = 0).
     case (n' = 0)=> //= [->> | ne0_n' ne0_n].
       by rewrite eq_sym=> ->.
-    by rewrite ih 1..2:smt. *)
+    by rewrite ih 1..2:smt.
   qed. 
 
   lemma get_set (xs : 'a list) (n n' : int) (x : 'a):
@@ -1466,12 +1480,6 @@ theory Array.
       else xs.[n']
   by [].
 
-(*  proof.
-    case (0 <= n < size xs)=> //= [| n_cond].
-      by apply nth_set.
-    by rewrite set_out 1:smt.
-  qed. *)
-
   lemma set_set (xs : 'a list) (n n' : int) (x x' : 'a):
     forall i,
       xs.[n <- x].[n' <- x'].[i] =
@@ -1479,15 +1487,6 @@ theory Array.
         then xs.[n' <- x'].[i]
         else xs.[n' <- x'].[n <- x].[i]
    by [].
-(*  proof. 
-    case (n = n')=> [->> /= |].
-      move=> i; rewrite !get_set; case (i = n')=> //=.
-      by rewrite size_set; case (0 <= n' < size xs).
-    move=> ne_n_n' i; case (i = n')=> [->> /= {i} |].
-      by rewrite !get_set /= @(eq_sym n') ne_n_n' /= size_set.
-    move=> ne_i_n'; case (i = n)=> [->> /= {i} |].
-      by rewrite !get_set /= ne_n_n' /= size_set.
-    by move=> ne_i_n; rewrite !get_set ne_i_n ne_i_n'. *)
 
   lemma set_set_eq (xs : 'a list) (n : int) (x x' : 'a):
     forall i, xs.[n <- x].[n <- x'].[i] = xs.[n <- x'].[i].
@@ -1497,5 +1496,4 @@ theory Array.
     0 <= n < size xs =>
     (mapi i f xs).[n] = f (n + i) xs.[n].
   proof. by rewrite !getE; elim xs i n=> //=;smt. qed.
-
 end Array.
