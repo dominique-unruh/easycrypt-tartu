@@ -200,7 +200,7 @@ module LowRewrite = struct
 
     let fp = match s with `LtoR -> f1 | `RtoL -> f2 in
 
-    (try  PT.pf_find_occurence pt.PT.ptev_env ~ptn:fp concl
+    (try  PT.pf_find_occurence ~keyed:true pt.PT.ptev_env ~ptn:fp concl
      with EcMatching.MatchFailure -> raise (RewriteError LRW_NothingToRewrite));
 
     if not (PT.can_concretize pt.PT.ptev_env) then
@@ -437,9 +437,28 @@ let rec process_rewrite1 ttenv ri tc =
               process_rewrite1_core (theside, o) pt tc in
             t_ors (List.map do1 ls) tc
 
+        | { fp_head = FPNamed (p, None); fp_args = []; }
+              when mode = `Implicit
+        ->
+          let env = FApi.tc1_env tc in
+          let pt  = PT.tc1_process_full_pterm ~implicits:(implicits mode) tc pt in
+
+          if    is_ptglobal pt.PT.ptev_pt.pt_head
+             && List.is_empty pt.PT.ptev_pt.pt_args
+          then begin
+            let ls = EcEnv.Ax.all ~name:(unloc p) env in
+
+            let do1 (lemma, _) tc =
+              let pt = PT.pt_of_uglobal !!tc (FApi.tc1_hyps tc) lemma in
+                process_rewrite1_core (theside, o) pt tc in
+              t_ors (List.map do1 ls) tc
+          end else
+            process_rewrite1_core (theside, o) pt tc
+
         | _ ->
           let pt = PT.tc1_process_full_pterm ~implicits:(implicits mode) tc pt in
-             process_rewrite1_core (theside, o) pt tc in
+          process_rewrite1_core (theside, o) pt tc
+        in
 
       let doall tc = t_ors (List.map do1 pts) tc in
 
@@ -564,6 +583,10 @@ let process_view1 pe tc =
           in
 
           List.iter (for1 ptenv.PT.pte_ev) ids;
+
+          if not (PT.can_concretize ptenv) then
+            tc_error !!tc "cannot infer all type variables";
+
           PT.concretize_e_form
             (PT.concretize_env ptenv)
             (f_forall (List.map snd ids) cutf)
@@ -807,8 +830,12 @@ let process_generalize1 pattern (tc : tcenv1) =
 
           let name =
             match EcParsetree.pf_ident pf with
-            | None   -> EcIdent.create "x"
-            | Some x -> EcIdent.create x
+            | None ->
+                EcIdent.create "x"
+            | Some x when EcIo.is_sym_ident x ->
+                EcIdent.create x
+            | Some _ ->
+                EcIdent.create (EcTypes.symbol_of_ty p.f_ty)
           in
 
           let name, newconcl = FPosition.topattern ~x:name cpos concl in

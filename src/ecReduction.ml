@@ -662,7 +662,18 @@ let check_alpha_equal ri hyps f1 f2 =
       | None ->
         match h_red_opt ri env hyps f2 with
         | Some f2 -> aux env subst f1 f2
-        | None -> raise e
+        | None ->
+          let ty,codom = 
+            match f1.f_node, f2.f_node with
+            | Fquant(Llambda,(_,GTty ty)::bd, f1'), _ ->
+              ty, toarrow (List.map (fun (_,gty)-> gty_as_ty gty) bd) f1'.f_ty 
+            | _,  Fquant(Llambda,(_,GTty ty)::bd,f2') ->
+              ty, toarrow (List.map (fun (_,gty)-> gty_as_ty gty) bd) f2'.f_ty
+            | _, _ -> raise e in
+          let x = f_local (EcIdent.create "_") ty in
+          let f1 = f_app_simpl f1 [x] codom in
+          let f2 = f_app_simpl f2 [x] codom in
+          aux env subst f1 f2
   in
   aux env Fsubst.f_subst_id f1 f2
 
@@ -696,10 +707,6 @@ and simplify_rec ri hyps f =
       let app1  = (fo, args , f.f_ty) in
       let app2  = (fo, args', f.f_ty) in
       let f'    =  EcFol.FSmart.f_app (f, app1) app2 in
-      (try h_red ri hyps f' with NotReducible -> f')
-
-  | Fapp({f_node = Fop _} as fo, args) -> 
-      let f' = f_app fo (List.map (simplify ri hyps) args) f.f_ty in
       (try h_red ri hyps f' with NotReducible -> f')
 
   | FhoareF hf when ri.modpath -> 

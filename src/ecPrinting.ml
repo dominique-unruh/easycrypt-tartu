@@ -85,12 +85,22 @@ module PPEnv = struct
 
   let add_local ?(force = false) ppe =
     fun id ->
+      let addu =
+        let id = EcIdent.name id in
+        if String.length id > 0 then
+          let c = id.[String.length id - 1] in
+          c >= '0' && c <= '9'
+        else
+          false
+      in
+
       let name = ref (EcIdent.name id) in
       let i    = ref 0 in
 
         if not force then
           while inuse ppe !name do
-            name := Printf.sprintf "%s%d" (EcIdent.name id) !i;
+            name := Printf.sprintf "%s%s%d"
+              (EcIdent.name id) (if addu then "_" else "") !i;
             incr i
           done;
 
@@ -483,7 +493,8 @@ let pp_mem (ppe : PPEnv.t) fmt x =
 
 (* -------------------------------------------------------------------- *)
 type assoc  = [`Left | `Right | `NonAssoc]
-type fixity = [`Prefix | `Postfix | `Infix of assoc]
+type iassoc = [`ILeft | `IRight | assoc]
+type fixity = [`Prefix | `Postfix | `Infix of assoc | `NonAssoc]
 type opprec = int * fixity
 
 (* -------------------------------------------------------------------- *)
@@ -723,7 +734,18 @@ let pp_opname fmt (nm, op) =
   in
     EcSymbols.pp_qsymbol fmt (nm, op)
 
-let pp_opapp (ppe : PPEnv.t) t_ty pp_sub outer fmt (pred, op, tvi, es) =
+let pp_opapp
+     (ppe    : PPEnv.t)
+     (t_ty   : 'a -> EcTypes.ty)
+    ((dt_sub : 'a -> (EcPath.path * _ * 'a list) option),
+     (pp_sub : PPEnv.t -> _ * (opprec * iassoc) -> _ -> 'a -> unit))
+     (outer  : symbol list * ((_ * fixity) * iassoc))
+     (fmt    : Format.formatter)
+     ((pred  : [`Expr | `Form]),
+      (op    : EcPath.path),
+      (tvi   : EcTypes.ty list),
+      (es    : 'a list))
+=
   let (nm, opname) =
     PPEnv.op_symb ppe op (Some (pred, tvi, List.map t_ty es)) in
 
@@ -737,14 +759,6 @@ let pp_opapp (ppe : PPEnv.t) t_ty pp_sub outer fmt (pred, op, tvi, es) =
         match opname, es with
         | x, [] when x = EcCoreLib.s_nil ->
             ((fun fmt -> pp_string fmt "[]"), max_op_prec)
-  
-        | x, [e1; e2] when x = EcCoreLib.s_cons ->
-            let pp fmt =
-              Format.fprintf fmt "%a :: %a"
-                (pp_sub ppe (inm, (e_bin_prio_rop4, `Left ))) e1
-                (pp_sub ppe (inm, (e_bin_prio_rop4, `Right))) e2
-            in
-              (pp, e_bin_prio_lop4)
   
         | x, [e] when x = EcCoreLib.s_abs ->
             let pp fmt =
@@ -810,6 +824,43 @@ let pp_opapp (ppe : PPEnv.t) t_ty pp_sub outer fmt (pred, op, tvi, es) =
 
   and try_pp_as_binop () =
     match es with
+    | [e1; e2] when opname = EcCoreLib.s_cons -> begin
+      let module E = struct exception NotAListLiteral end in
+
+      try
+        let aslist =
+          let rec destruct e =
+            match dt_sub e with
+            | Some (op, _tvi, [e1; e2])
+                when EcPath.basename op = EcCoreLib.s_cons
+                -> e1 :: destruct e2
+
+            | Some (op, _tvi, [])
+                when EcPath.basename op = EcCoreLib.s_nil
+                -> []
+
+            | _ -> raise E.NotAListLiteral
+
+          in e1 :: (destruct e2) in
+
+        let pp_sub = pp_sub ppe (inm, (min_op_prec, `NonAssoc)) in
+        let pp fmt = fun () ->
+          Format.fprintf fmt "[@[<hov 2>%a@]]"
+            (pp_list ";@ " pp_sub) aslist
+        in
+          Some pp
+
+      with E.NotAListLiteral ->
+        let pp fmt =
+          Format.fprintf fmt "%a :: %a"
+            (pp_sub ppe (inm, (e_bin_prio_rop4, `Left ))) e1
+            (pp_sub ppe (inm, (e_bin_prio_rop4, `Right))) e2 in
+        let pp fmt =
+          maybe_paren outer (inm, e_bin_prio_lop4) (fun fmt () -> pp fmt) fmt in
+
+        Some pp
+      end
+
     | [e1; e2] -> begin
       match priority_of_binop opname with
       | None -> None
@@ -823,6 +874,7 @@ let pp_opapp (ppe : PPEnv.t) t_ty pp_sub outer fmt (pred, op, tvi, es) =
             maybe_paren outer (inm, opprio) (fun fmt () -> pp fmt) fmt
           in
             Some pp
+
     end
     | _ -> None
 
@@ -1000,6 +1052,20 @@ and try_pp_expr_chained_orderings (ppe : PPEnv.t) outer fmt e =
         true
 
 and pp_expr_core_r (ppe : PPEnv.t) outer fmt (e : expr) =
+  let pp_opapp ppe outer fmt (op, tys, es) =
+    let dt_sub e =
+      match e.e_node with
+      | Eop (p, tvi) ->
+          Some (p, tvi, [])
+      | Eapp ({ e_node = Eop (p, tvi) }, args) ->
+          Some (p, tvi, args)
+      | _ -> None
+    in
+      pp_opapp ppe e_ty
+        (dt_sub, pp_expr_r)
+        outer fmt (`Expr, op, tys, es)
+  in
+
   match e.e_node with
   | Eint i ->
       Format.fprintf fmt "%a" BI.pp_print i
@@ -1011,7 +1077,7 @@ and pp_expr_core_r (ppe : PPEnv.t) outer fmt (e : expr) =
       pp_local ppe fmt x
 
   | Eop (op, tys) ->
-      pp_opapp ppe e_ty pp_expr_r outer fmt (`Expr, op, tys, [])
+      pp_opapp ppe outer fmt (op, tys, [])
 
   | Eif (c, e1, e2) ->
       pp_if3 ppe pp_expr_r outer fmt (c, e1, e2)
@@ -1033,10 +1099,10 @@ and pp_expr_core_r (ppe : PPEnv.t) outer fmt (e : expr) =
         && EcPath.p_equal op' EcCoreLib.CI_Bool.p_eq
     ->
       let negop = EcPath.pqoname (EcPath.prefix op') "<>" in
-      pp_opapp ppe e_ty pp_expr_r outer fmt (`Expr, negop, tys, [f1; f2])
+      pp_opapp ppe outer fmt (negop, tys, [f1; f2])
 
   | Eapp ({e_node = Eop (op, tys) }, args) ->
-      pp_opapp ppe e_ty pp_expr_r outer fmt (`Expr, op, tys, args)
+      pp_opapp ppe outer fmt (op, tys, args)
 
   | Eapp (e, args) ->
       pp_app ppe (pp_expr_r, pp_expr_r) outer fmt (e, args)
@@ -1073,11 +1139,11 @@ let pp_lvalue (ppe : PPEnv.t) fmt lv =
 let pp_instr_for_form (ppe : PPEnv.t) fmt i =
   match i.i_node with
   | Sasgn (lv, e) ->
-      Format.fprintf fmt "%a =@;<1 2>%a"
+      Format.fprintf fmt "%a <-@;<1 2>%a"
         (pp_lvalue ppe) lv (pp_expr ppe) e
 
   | Srnd (lv, e) ->
-      Format.fprintf fmt "%a =@;<1 2>$%a"
+      Format.fprintf fmt "%a <$@;<1 2>$%a"
         (pp_lvalue ppe) lv (pp_expr ppe) e
 
   | Scall (None, xp, args) ->
@@ -1086,16 +1152,10 @@ let pp_instr_for_form (ppe : PPEnv.t) fmt i =
         (pp_list ",@ " (pp_expr ppe)) args
 
   | Scall (Some lv, xp, args) ->
-      let assign_operator =
-        match xp.EcPath.x_top.EcPath.m_args with
-        | [] -> "="
-        | _  -> "<-"
-      in
-        Format.fprintf fmt "%a %s@;<1 2>@[%a(@[<hov 0>%a@]);@]"
-          (pp_lvalue ppe) lv
-          assign_operator
-          (pp_funname ppe) xp
-          (pp_list ",@ " (pp_expr ppe)) args
+      Format.fprintf fmt "%a <@@@;<1 2>@[%a(@[<hov 0>%a@]);@]"
+        (pp_lvalue ppe) lv
+        (pp_funname ppe) xp
+        (pp_list ",@ " (pp_expr ppe)) args
 
   | Sassert e ->
       Format.fprintf fmt "assert %a;"
@@ -1327,6 +1387,18 @@ and try_pp_lossless (ppe : PPEnv.t) outer fmt f =
               maybe_paren outer (fst outer, prio) pp fmt (); true
 
 and pp_form_core_r (ppe : PPEnv.t) outer fmt f =
+  let pp_opapp ppe outer fmt (op, tys, es) =
+    let dt_sub f =
+      match destr_app f with
+      | ({ f_node = Fop (p, tvi) }, args) -> Some (p, tvi, args)
+      | _ -> None
+    in
+      pp_opapp ppe f_ty
+        (dt_sub, pp_form_r)
+        outer fmt (`Form, op, tys, es)
+  in
+
+
   match f.f_node with
   | Fint n ->
       Format.fprintf fmt "%a" BI.pp_print n
@@ -1373,7 +1445,7 @@ and pp_form_core_r (ppe : PPEnv.t) outer fmt f =
       pp_let ppe pp_form_r outer fmt (lp, f1, f2)
 
   | Fop (op, tvi) ->
-      pp_opapp ppe f_ty pp_form_r outer fmt (`Form, op, tvi, [])
+      pp_opapp ppe outer fmt (op, tvi, [])
 
   | Fapp ({f_node = Fop (op, _)},
             [{f_node = Fapp ({f_node = Fop (op', tys)}, [f1; f2])}])
@@ -1381,10 +1453,10 @@ and pp_form_core_r (ppe : PPEnv.t) outer fmt f =
         && EcPath.p_equal op' EcCoreLib.CI_Bool.p_eq
     ->
       let negop = EcPath.pqoname (EcPath.prefix op') "<>" in
-      pp_opapp ppe f_ty pp_form_r outer fmt (`Form, negop, tys, [f1; f2])
+      pp_opapp ppe outer fmt (negop, tys, [f1; f2])
 
   | Fapp ({f_node = Fop (p, tys)}, args) ->
-      pp_opapp ppe f_ty pp_form_r outer fmt (`Form, p, tys, args)
+      pp_opapp ppe outer fmt (p, tys, args)
 
   | Fapp (e, args) ->
       pp_app ppe (pp_form_r, pp_form_r) outer fmt (e, args)
@@ -1467,7 +1539,8 @@ and pp_form_core_r (ppe : PPEnv.t) outer fmt f =
         (pp_form_r ppe (fst outer, (max_op_prec,`NonAssoc))) hs.bhs_bd
 
   | Fpr pr->
-      let ppe = PPEnv.create_and_push_mem ppe ~active:true (EcFol.mhr, pr.pr_fun) in
+      let spe = PPEnv.create_and_push_mem ppe ~active:true (EcFol.mhr, pr.pr_fun) in
+      let spe = PPEnv.add_local spe pr.pr_mem in
       Format.fprintf fmt "Pr[@[%a@[%t@] @@ %a :@ %a@]]"
         (pp_funname ppe) pr.pr_fun
         (match pr.pr_args.f_node with
@@ -1477,8 +1550,8 @@ and pp_form_core_r (ppe : PPEnv.t) outer fmt f =
              (fun fmt -> pp_string fmt "()")
          | _ ->
              (fun fmt -> Format.fprintf fmt "(%a)" (pp_form ppe) pr.pr_args))
-        (pp_local ppe) pr.pr_mem
-        (pp_form ppe) pr.pr_event
+        (pp_local spe) pr.pr_mem
+        (pp_form spe) pr.pr_event
 
 and pp_form_r (ppe : PPEnv.t) outer fmt f =
   let printers =

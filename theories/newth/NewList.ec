@@ -1152,6 +1152,9 @@ theory Iota.
   axiom iota0 i n : n <= 0 => iota_ i n = [].
   axiom iotaS i n : 0 <= n => iota_ i (n+1) = i :: iota_ (i+1) n.
 
+  lemma iota1 i : iota_ i 1 = [i].
+  proof. by rewrite (iotaS i 0) // iota0. qed.
+
   lemma size_iota m n: size (iota_ m n) = max 0 n.
   proof. 
     elim/Induction.natind: n m => [n hn|n hn ih] m.
@@ -1167,6 +1170,10 @@ theory Iota.
     by rewrite addzAC !iotaS // 1:smt ih addzAC addzA.
   qed.
  
+  lemma iotaSr i n : 0 <= n =>
+    iota_ i (n+1) = rcons (iota_ i n) (i+n).
+  proof. by move=> ge0_n; rewrite iota_add // iota1 cats1. qed.
+
   lemma nth_iota m n i: 0 <= i < n => nth 0 (iota_ m n) i = m + i.
   proof.
     case=> ge0_i lt_in; rewrite (_ : n = i + ((n-i-1)+1)) 1:smt.
@@ -1196,6 +1203,45 @@ theory Iota.
 end Iota.
 
 export Iota.
+
+(* -------------------------------------------------------------------- *)
+theory Range.
+  op range (m n : int) = iota_ m (n - m).
+
+  import Ring.IntID.
+
+  lemma range_geq (m n : int): n <= m => range m n = [].
+  proof. smt. qed.
+
+  lemma range_ltn (m n : int): m < n =>
+    range m n = m :: range (m+1) n.
+  proof. smt. qed.
+
+  lemma range_add (m n a : int):
+    range (m+a) (n+a) = map (Int.(+) a) (range m n).
+  proof. by rewrite /range addrC iota_addl; congr; smt. qed.
+
+  lemma range_addl (m n a : int):
+    range (m+a) n = map (Int.(+) a) (range m (n-a)).
+  proof. by rewrite -{1}(addrNK a n) -subrE range_add. qed.
+
+  lemma range_addr (m n a : int):
+    range m (n+a) = map (Int.(+) a) (range (m-a) n).
+  proof. by rewrite -{1}(addrNK a m) -subrE range_add. qed.
+
+  lemma range_cat (n m p : int): m <= n => n <= p =>
+    range m p = range m n ++ range n p.
+  proof. admit. qed.
+
+  lemma mem_range (m n i: int):
+    (mem (range m n) i) <=> (m <= i < n).
+  proof.
+    rewrite /range mem_iota; case: (m <= i)=> //=.
+    by rewrite subrE addrCA addrN addr0.
+  qed.
+end Range.
+
+export Range.
 
 (* -------------------------------------------------------------------- *)
 (*                        Association lists                             *)

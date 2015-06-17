@@ -75,6 +75,10 @@ val as_seq6 : 'a list -> 'a tuple6
 val as_seq7 : 'a list -> 'a tuple7
 
 (* -------------------------------------------------------------------- *)
+val t2_map : ('a -> 'b) -> 'a tuple2 -> 'b tuple2
+val t3_map : ('a -> 'b) -> 'a tuple3 -> 'b tuple3
+
+(* -------------------------------------------------------------------- *)
 val int_of_bool : bool -> int
 
 (* -------------------------------------------------------------------- *)
@@ -186,8 +190,7 @@ module String : sig
 
   val split_lines : string -> string list
 
-  (* [matched_string tomatch s] return the sublist of tomatch which match s *)
-  val matched_string : string list -> string -> string list
+  val option_matching : string list -> string -> string list
 end
 
 (* -------------------------------------------------------------------- *)
@@ -237,6 +240,9 @@ module List : sig
   (*------------------------------------------------------------------ *)
   val fst : ('a * 'b) list -> 'a list
   val snd : ('a * 'b) list -> 'b list
+
+  val min : ?cmp:('a -> 'a -> int) -> 'a list -> 'a
+  val max : ?cmp:('a -> 'a -> int) -> 'a list -> 'a
 
   val mbfilter   : ('a -> bool) -> 'a list -> 'a list
   val fusion     : ('a -> 'a -> 'a) -> 'a list -> 'a list -> 'a list
