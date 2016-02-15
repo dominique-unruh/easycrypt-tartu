@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -76,4 +78,7 @@ module NameGen = struct
       let s = ofint (Counter.next map.ng_counter) in
         map.ng_map <- Muid.add id s map.ng_map;
         s
+
+  let bulk ?(fmt = (fun (x : string) -> x)) (n : int) =
+    List.init n (fun i -> fmt (ofint i))
 end

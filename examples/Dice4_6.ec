@@ -1,6 +1,6 @@
 require import Int Real Distr FSet Dice_sampling.
 
-clone GenDice as D4_6 with 
+clone GenDice as D4_6 with
   type t <- int,
   type input <- unit,
   pred valid = predT,
@@ -19,14 +19,14 @@ realize d'_uni.
 qed.
 
 module D4 = {
-  proc sample () : int = { 
+  proc sample () : int = {
     var r : int;
     r = $[1..4];
     return r;
   }
 }.
 
-lemma prD4 : forall k &m, Pr[D4.sample() @ &m : res = k] = 
+lemma prD4 : forall k &m, Pr[D4.sample() @ &m : res = k] =
    if 1 <= k && k <= 4 then 1%r/4%r else 0%r.
 proof.
   move=> k &m; byphoare=> //.
@@ -49,7 +49,7 @@ equiv D4_Sample : D4.sample ~ D4_6.Sample.sample : true ==> ={res}.
 proof. proc; rnd => //. qed.
 
 equiv D6_RsampleW : D6.sample ~ D4_6.RsampleW.sample : r{2} = 5 ==> ={res}.
-proof. 
+proof.
   proc; while (={r}).
     by rnd; skip; smt.
   by wp.
@@ -66,7 +66,7 @@ proof.
   transitivity D4_6.RsampleW.sample (r{2} = 5 ==> res{1} = finv res{2})
       (r{1} = 5 ==> res{2} = res{1}) => //.
     by move=> _ _ _;exists ((),5).
-    conseq (D4_6.Sample_RsampleW f finv) => //.
+    conseq [-frame] (D4_6.Sample_RsampleW f finv) => //.
     move=> &m1 &m2 -> /=; split; first by smt.
     split; first by rewrite /D4_6.valid.
     split; first by rewrite Dinter.weight_def.
@@ -76,10 +76,10 @@ proof.
   by symmetry; apply/D6_RsampleW.
 qed.
 
-lemma prD6 : forall k &m, Pr[D6.sample() @ &m : res = k] = 
+lemma prD6 : forall k &m, Pr[D6.sample() @ &m : res = k] =
       if 1 <= k && k <= 4 then 1%r/4%r else 0%r.
 proof.
-  move=> k &m. 
+  move=> k &m.
   rewrite -(_:Pr[D4.sample() @ &m : res = k] = Pr[D6.sample() @ &m : res = k]).
     by byequiv (D4_D6 (fun x, x) (fun x, x) _ _).
   by apply (prD4 k &m).

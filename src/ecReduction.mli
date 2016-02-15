@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -10,6 +12,10 @@ open EcTypes
 open EcFol
 open EcModules
 open EcEnv
+
+(* -------------------------------------------------------------------- *)
+exception IncompatibleType of env * (ty * ty)
+exception IncompatibleForm of env * (form * form)
 
 (* -------------------------------------------------------------------- *)
 type 'a eqtest = env -> 'a -> 'a -> bool
@@ -37,9 +43,12 @@ type reduction_info = {
   delta_h : (ident -> bool); (* None means all *)
   zeta    : bool;            (* reduce let  *)
   iota    : bool;            (* reduce case *)
-  logic   : bool;            (* perform logical simplification *)
+  eta     : bool;            (* reduce eta-expansion *)
+  logic   : rlogic_info;     (* perform logical simplification *)
   modpath : bool;            (* reduce module path *)
 }
+
+and rlogic_info = [`Full | `ProductCompat] option
 
 val full_red     : reduction_info
 val no_red       : reduction_info

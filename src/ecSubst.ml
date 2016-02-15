@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -44,8 +46,8 @@ let empty : subst = {
   sb_pddef   = Mp.empty;
 }
 
-let is_empty s = 
-  Mp.is_empty s.sb_path && Mid.is_empty s.sb_modules 
+let is_empty s =
+  Mp.is_empty s.sb_path && Mid.is_empty s.sb_modules
 
 let add_module (s : subst) (x : EcIdent.t) (m : EcPath.mpath) =
   let merger = function
@@ -81,7 +83,7 @@ type _subst = {
   s_pd  : (EcIdent.t list * form) Mp.t;
 }
 
-let _subst_of_subst s = 
+let _subst_of_subst s =
   let sp  = EcPath.p_subst s.sb_path in
   let sm  = EcPath.Hm.memo 107 (EcPath.m_subst sp s.sb_modules) in
   let sty = { ty_subst_id with ts_p = sp; ts_mp = sm; ts_def = s.sb_tydef; } in
@@ -94,7 +96,7 @@ let _subst_of_subst s =
       s_op  = s.sb_opdef;
       s_pd  = s.sb_pddef; }
 
-let e_subst_of_subst (s:_subst) = 
+let e_subst_of_subst (s:_subst) =
   { es_freshen = true;
     es_p       = s.s_p;
     es_ty      = s.s_ty;
@@ -103,7 +105,7 @@ let e_subst_of_subst (s:_subst) =
     es_xp      = EcPath.x_subst s.s_fmp;
     es_loc     = Mid.empty; }
 
-let f_subst_of_subst (s:_subst) = 
+let f_subst_of_subst (s:_subst) =
   Fsubst.f_subst_init
     ~freshen:true ~mods:s.s_s.sb_modules ~sty:s.s_sty
     ~opdef:s.s_op ~prdef:s.s_pd ()
@@ -126,7 +128,7 @@ let subst_fun_uses (s : _subst) (u : uses) =
   EcModules.mk_uses calls reads writes
 
 (* -------------------------------------------------------------------- *)
-let subst_oracle_info (s:_subst) (x:oracle_info) = 
+let subst_oracle_info (s:_subst) (x:oracle_info) =
   let x_subst = EcPath.x_subst s.s_fmp in
     { oi_calls  = List.map x_subst x.oi_calls;
       oi_in     = x.oi_in;
@@ -206,8 +208,8 @@ let subst_function_def (s : _subst) (def : function_def) =
 (* -------------------------------------------------------------------- *)
 let subst_function (s : _subst) (f : function_) =
   let sig' = subst_funsig s f.f_sig in
-  let def' = 
-    match f.f_def with 
+  let def' =
+    match f.f_def with
     | FBdef def -> FBdef (subst_function_def s def)
     | FBalias f -> FBalias (EcPath.x_subst s.s_fmp f)
     | FBabs oi  -> FBabs (subst_oracle_info s oi) in
@@ -247,12 +249,12 @@ and subst_module_body (s : _subst) (body : module_body) =
   | ME_Structure bstruct ->
       ME_Structure (subst_module_struct s bstruct)
 
-  | ME_Decl (p, (rx,r)) -> 
-    let rx = 
+  | ME_Decl (p, (rx,r)) ->
+    let rx =
       EcPath.Sx.fold
         (fun x r -> EcPath.Sx.add (EcPath.x_subst s.s_fmp x) r) rx EcPath.Sx.empty in
-    let r = 
-      EcPath.Sm.fold 
+    let r =
+      EcPath.Sm.fold
         (fun x r -> EcPath.Sm.add (s.s_fmp x) r) r EcPath.Sm.empty
       in
         ME_Decl (subst_modtype s p, (rx, r))
@@ -273,17 +275,17 @@ let init_tparams (s : _subst) (params : ty_params) (params' : ty_params) =
   match params with
   | [] -> s
   | _  ->
-    let styv =  
-      List.fold_left2 (fun m (p, _) (p', _) -> Mid.add p (tvar p') m) 
+    let styv =
+      List.fold_left2 (fun m (p, _) (p', _) -> Mid.add p (tvar p') m)
         Mid.empty params params' in
-    let sty = 
-      { ty_subst_id with 
+    let sty =
+      { ty_subst_id with
           ts_def = s.s_sty.ts_def;
           ts_p   = s.s_p;
           ts_mp  = s.s_fmp;
           ts_v   = Mid.find_opt^~ styv; }
     in
-      { s with s_sty = sty; s_ty = EcTypes.ty_subst sty } 
+      { s with s_sty = sty; s_ty = EcTypes.ty_subst sty }
 
 (* -------------------------------------------------------------------- *)
 let subst_typaram (s : _subst) ((id, tc) : ty_param) =
@@ -301,7 +303,7 @@ let subst_genty (s : _subst) (typ, ty) =
 (* -------------------------------------------------------------------- *)
 let subst_tydecl (s : _subst) (tyd : tydecl) =
   let params' = List.map (subst_typaram s) tyd.tyd_params in
-  let body = 
+  let body =
     match tyd.tyd_type with
     | `Abstract tc ->
         `Abstract (Sp.fold (fun p tc -> Sp.add (s.s_p p) tc) tc Sp.empty)
@@ -325,16 +327,25 @@ let subst_tydecl (s : _subst) (tyd : tydecl) =
 
 (* -------------------------------------------------------------------- *)
 let rec subst_op_kind (s : _subst) (kind : operator_kind) =
-  match kind with 
+  match kind with
   | OB_oper (Some body) ->
       OB_oper (Some (subst_op_body s body))
 
-  | OB_pred (Some body) ->   
-      let s = f_subst_of_subst s in
-      let body  = Fsubst.f_subst s body in
-        OB_pred (Some body) 
+  | OB_pred (Some body) ->
+      OB_pred (Some (subst_pr_body s body))
+
+  | OB_nott nott ->
+     OB_nott (subst_notation s nott)
 
   | OB_oper None | OB_pred None -> kind
+
+and subst_notation (s : _subst) (nott : notation) =
+  let es = e_subst_of_subst s in
+  let es, xs = EcTypes.add_locals es nott.ont_args in
+  { ont_args  = xs;
+    ont_resty = s.s_ty nott.ont_resty;
+    ont_body  = EcTypes.e_subst es nott.ont_body;
+    ont_ponly = nott.ont_ponly; }
 
 and subst_op_body (s : _subst) (bd : opbody) =
   match bd with
@@ -374,6 +385,14 @@ and subst_branches es = function
       in
         OPB_Branch (Parray.map for1 bs)
 
+and subst_pr_body (s : _subst) (bd : prbody) =
+  match bd with
+  | PR_Plain body ->
+      let s = f_subst_of_subst s in
+      PR_Plain (Fsubst.f_subst s body)
+
+  | PR_Ind _ -> assert false
+
 (* -------------------------------------------------------------------- *)
 let subst_op (s : _subst) (op : operator) =
   let tparams = List.map (subst_typaram s) op.op_tparams in
@@ -388,17 +407,12 @@ let subst_op (s : _subst) (op : operator) =
 let subst_ax (s : _subst) (ax : axiom) =
   let params = List.map (subst_typaram s) ax.ax_tparams in
   let s      = init_tparams s ax.ax_tparams params in
-  let spec   = 
-    match ax.ax_spec with
-    | None -> None
-    | Some f -> 
-        let s = f_subst_of_subst s in
-          Some (Fsubst.f_subst s f)
-  in
-     { ax_tparams = params;
-       ax_spec    = spec;
-       ax_kind    = ax.ax_kind;
-       ax_nosmt   = ax.ax_nosmt; }
+  let spec   = Fsubst.f_subst (f_subst_of_subst s) ax.ax_spec in
+
+  { ax_tparams = params;
+    ax_spec    = spec;
+    ax_kind    = ax.ax_kind;
+    ax_nosmt   = ax.ax_nosmt; }
 
 (* -------------------------------------------------------------------- *)
 let subst_ring (s : _subst) cr =
@@ -461,7 +475,7 @@ let rec subst_theory_item (s : _subst) (item : theory_item) =
   | Th_theory (x, (th, thmode)) ->
       Th_theory (x, (subst_theory s th, thmode))
 
-  | Th_export p -> 
+  | Th_export p ->
       Th_export (s.s_p p)
 
   | Th_instance (ty, tci) ->
@@ -470,15 +484,18 @@ let rec subst_theory_item (s : _subst) (item : theory_item) =
   | Th_typeclass (x, tc) ->
       Th_typeclass (x, subst_tc s tc)
 
-  | Th_baserw _ -> 
+  | Th_baserw _ ->
       item
-      
-  | Th_addrw(b,ls) -> 
-      Th_addrw(s.s_p b, List.map s.s_p ls)
-    
+
+  | Th_addrw (b, ls) ->
+      Th_addrw (s.s_p b, List.map s.s_p ls)
+
+  | Th_auto (lc, ps) ->
+      Th_auto (lc, Sp.translate s.s_p ps)
+
 (* -------------------------------------------------------------------- *)
 and subst_theory (s : _subst) (items : theory) =
-  List.map (subst_theory_item s) items 
+  List.map (subst_theory_item s) items
 
 (* -------------------------------------------------------------------- *)
 and subst_ctheory_item (s : _subst) (item : ctheory_item) =
@@ -510,11 +527,14 @@ and subst_ctheory_item (s : _subst) (item : ctheory_item) =
   | CTh_typeclass (x, tc) ->
       CTh_typeclass (x, subst_tc s tc)
 
-  | CTh_baserw _ -> 
+  | CTh_baserw _ ->
       item
-      
-  | CTh_addrw(b,ls) -> 
-      CTh_addrw(s.s_p b, List.map s.s_p ls)
+
+  | CTh_addrw (b, ls) ->
+      CTh_addrw (s.s_p b, List.map s.s_p ls)
+
+  | CTh_auto (lc, ps) ->
+      CTh_auto (lc, Sp.translate s.s_p ps)
 
 (* -------------------------------------------------------------------- *)
 and subst_ctheory_struct (s : _subst) (th : ctheory_struct) =

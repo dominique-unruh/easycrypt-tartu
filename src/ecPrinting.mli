@@ -1,10 +1,13 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
 open EcIdent
+open EcSymbols
 open EcPath
 open EcTypes
 open EcFol
@@ -17,8 +20,11 @@ module PPEnv : sig
   type t
 
   val ofenv : EcEnv.env -> t
+  val add_locals : ?force:bool -> t -> EcIdent.t list -> t
 end
 
+(* -------------------------------------------------------------------- *)
+val string_of_hcmp : EcFol.hoarecmp -> string
 (* -------------------------------------------------------------------- *)
 type 'a pp = Format.formatter -> 'a -> unit
 
@@ -37,7 +43,7 @@ val pp_list : ('a, 'b, 'c, 'd, 'd, 'a) format6 -> 'a pp -> 'a list pp
 
 (* -------------------------------------------------------------------- *)
 val pp_pv      : PPEnv.t -> prog_var pp
-val pp_local   : PPEnv.t -> ident pp
+val pp_local   : ?fv:Sid.t -> PPEnv.t -> ident pp
 val pp_opname  : PPEnv.t -> path pp
 val pp_funname : PPEnv.t -> xpath pp
 val pp_topmod  : PPEnv.t -> mpath pp
@@ -53,10 +59,11 @@ val pp_path     : path pp
 (* -------------------------------------------------------------------- *)
 val pp_typedecl : PPEnv.t -> (path * tydecl                ) pp
 val pp_opdecl   : ?long:bool -> PPEnv.t -> (path * operator) pp
+val pp_added_op : PPEnv.t -> operator pp
 val pp_axiom    : ?long:bool -> PPEnv.t -> (path * axiom   ) pp
 val pp_theory   : PPEnv.t -> (path * (ctheory * thmode)    ) pp
 val pp_modtype  : PPEnv.t -> (module_type * mod_restr      ) pp
-val pp_modexp   : PPEnv.t -> (module_expr                  ) pp
+val pp_modexp   : PPEnv.t -> (mpath * module_expr          ) pp
 val pp_modsig   : PPEnv.t -> (path * module_sig            ) pp
 
 (* -------------------------------------------------------------------- *)
@@ -64,8 +71,8 @@ val pp_hoareS   : PPEnv.t -> hoareS  pp
 val pp_bdhoareS : PPEnv.t -> bdHoareS pp
 val pp_equivS   : PPEnv.t -> equivS  pp
 
-val pp_stmt  : PPEnv.t -> stmt pp 
-val pp_instr : PPEnv.t -> instr pp 
+val pp_stmt  : PPEnv.t -> stmt pp
+val pp_instr : PPEnv.t -> instr pp
 
 (* -------------------------------------------------------------------- *)
 type ppgoal = (EcBaseLogic.hyps * EcFol.form) * [
@@ -74,3 +81,14 @@ type ppgoal = (EcBaseLogic.hyps * EcFol.form) * [
 ]
 
 val pp_goal : PPEnv.t -> ppgoal pp
+
+(* -------------------------------------------------------------------- *)
+module ObjectInfo : sig
+  val pr_ty  : Format.formatter -> EcEnv.env -> qsymbol -> unit
+  val pr_op  : Format.formatter -> EcEnv.env -> qsymbol -> unit
+  val pr_th  : Format.formatter -> EcEnv.env -> qsymbol -> unit
+  val pr_ax  : Format.formatter -> EcEnv.env -> qsymbol -> unit
+  val pr_mod : Format.formatter -> EcEnv.env -> qsymbol -> unit
+  val pr_mty : Format.formatter -> EcEnv.env -> qsymbol -> unit
+  val pr_any : Format.formatter -> EcEnv.env -> qsymbol -> unit
+end

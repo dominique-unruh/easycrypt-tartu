@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -53,20 +55,37 @@ module Map = struct
   struct include M end
 end
 
-module Set = Why3.Extset
+module Set = struct
+  module type OrderedType = Why3.Extset.OrderedType
+
+  module type S = sig
+    include Why3.Extset.S
+
+    val big_union : t list -> t
+  end
+
+  module MakeOfMap(M : Why3.Extmap.S) : S with module M = M = struct
+    include Why3.Extset.MakeOfMap(M)
+
+    let big_union (xs : t list) : t =
+      List.fold_left union empty xs
+  end
+
+  module Make(Ord : OrderedType) = MakeOfMap(Map.Make(Ord))
+end
 
 module EHashtbl = struct
   module type S = sig
     include Why3.Exthtbl.S
-    val memo_rec : int -> ((key -> 'a) -> key -> 'a) -> key -> 'a   
+    val memo_rec : int -> ((key -> 'a) -> key -> 'a) -> key -> 'a
   end
 
   module Make(T : Why3.Stdlib.OrderedHashedType) = struct
     include Why3.Exthtbl.Make(T)
 
-    let memo_rec size f = 
+    let memo_rec size f =
       let h = create size in
-      let rec aux x = 
+      let rec aux x =
         try find h x with Not_found -> let r = f aux x in add h x r; r in
       aux
   end

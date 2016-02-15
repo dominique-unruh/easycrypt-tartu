@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -14,15 +16,16 @@ open EcTypes
  * - m  is the map to be updated
  * - x  is the index to update
  * - ty is the type of the value [m] *)
-type lvalue =
-  | LvVar   of (EcTypes.prog_var * EcTypes.ty)
-  | LvTuple of (EcTypes.prog_var * EcTypes.ty) list
-  | LvMap   of (EcPath.path * EcTypes.ty list) *
-                  EcTypes.prog_var * EcTypes.expr * EcTypes.ty
+type lvmap = (path * ty list) *  prog_var * expr * ty
 
-val lv_equal : lvalue -> lvalue -> bool
+type lvalue =
+  | LvVar   of (prog_var * ty)
+  | LvTuple of (prog_var * ty) list
+  | LvMap   of lvmap
+
+val lv_equal     : lvalue -> lvalue -> bool
 val symbol_of_lv : lvalue -> symbol
-val ty_of_lv : lvalue -> EcTypes.ty
+val ty_of_lv     : lvalue -> EcTypes.ty
 
 (* --------------------------------------------------------------------- *)
 type instr = private {
@@ -32,12 +35,12 @@ type instr = private {
 }
 
 and instr_node =
-  | Sasgn     of lvalue * EcTypes.expr
-  | Srnd      of lvalue * EcTypes.expr
-  | Scall     of lvalue option * EcPath.xpath * EcTypes.expr list
-  | Sif       of EcTypes.expr * stmt * stmt
-  | Swhile    of EcTypes.expr * stmt
-  | Sassert   of EcTypes.expr
+  | Sasgn     of lvalue * expr
+  | Srnd      of lvalue * expr
+  | Scall     of lvalue option * xpath * expr list
+  | Sif       of expr * stmt * stmt
+  | Swhile    of expr * stmt
+  | Sassert   of expr
   | Sabstract of EcIdent.t
 
 and stmt = private {
@@ -60,18 +63,25 @@ val s_fv      : stmt -> int EcIdent.Mid.t
 val s_subst   : e_subst -> stmt -> stmt
 
 (* -------------------------------------------------------------------- *)
-val i_asgn    : lvalue * expr -> instr
-val i_rnd     : lvalue * expr -> instr
-val i_call    : lvalue option * xpath * expr list -> instr
-val i_if      : expr * stmt * stmt -> instr
-val i_while   : expr * stmt -> instr
-val i_assert  : expr -> instr
+val i_asgn     : lvalue * expr -> instr
+val i_rnd      : lvalue * expr -> instr
+val i_call     : lvalue option * xpath * expr list -> instr
+val i_if       : expr * stmt * stmt -> instr
+val i_while    : expr * stmt -> instr
+val i_assert   : expr -> instr
 val i_abstract : EcIdent.t -> instr
 
-val s_seq     : stmt -> stmt -> stmt
+val s_asgn     : lvalue * expr -> stmt
+val s_rnd      : lvalue * expr -> stmt
+val s_call     : lvalue option * xpath * expr list -> stmt
+val s_if       : expr * stmt * stmt -> stmt
+val s_while    : expr * stmt -> stmt
+val s_assert   : expr -> stmt
+val s_abstract : EcIdent.t -> stmt
+val s_seq      : stmt -> stmt -> stmt
+val s_empty    : stmt
 
-val stmt : instr list -> stmt
-(* [rstmt l] is stmt (List.rev l) *)
+val stmt  : instr list -> stmt
 val rstmt : instr list -> stmt
 
 val s_split : int -> stmt -> instr list * instr list
@@ -89,7 +99,10 @@ val is_rnd    : instr -> bool
 val is_call   : instr -> bool
 val is_if     : instr -> bool
 val is_while  : instr -> bool
-val is_assert : instr -> bool 
+val is_assert : instr -> bool
+
+(* -------------------------------------------------------------------- *)
+val get_uninit_read : stmt -> Sx.t
 
 (* -------------------------------------------------------------------- *)
 type variable = {
@@ -97,6 +110,10 @@ type variable = {
   v_type : EcTypes.ty;
 }
 
+val v_name : variable -> symbol
+val v_type : variable -> EcTypes.ty
+
+(* -------------------------------------------------------------------- *)
 type funsig = {
   fs_name   : symbol;
   fs_arg    : EcTypes.ty;
@@ -161,11 +178,18 @@ type function_ = {
 }
 
 (* -------------------------------------------------------------------- *)
+type abs_uses = {
+  aus_calls  : EcPath.xpath list;
+  aus_reads  : (prog_var * ty) list;
+  aus_writes : (prog_var * ty) list;
+}
 
+(* -------------------------------------------------------------------- *)
 type mod_restr = EcPath.Sx.t * EcPath.Sm.t
 
 val mr_equal : mod_restr -> mod_restr -> bool
 
+(* -------------------------------------------------------------------- *)
 type module_expr = {
   me_name  : symbol;
   me_body  : module_body;
@@ -207,3 +231,7 @@ val mty_subst : (path -> path) -> (mpath -> mpath) -> module_type -> module_type
 
 val mty_equal : module_type -> module_type -> bool
 val mty_hash  : module_type -> int
+
+(* -------------------------------------------------------------------- *)
+val get_uninit_read_of_fun : xpath -> function_ -> Sx.t
+val get_uninit_read_of_module : path -> module_expr -> (xpath * Sx.t) list

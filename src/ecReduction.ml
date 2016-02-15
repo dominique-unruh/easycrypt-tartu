@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -10,7 +12,6 @@ open EcPath
 open EcTypes
 open EcModules
 open EcFol
-open EcBaseLogic
 open EcEnv
 
 module BI = EcBigInt
@@ -18,24 +19,6 @@ module BI = EcBigInt
 (* -------------------------------------------------------------------- *)
 exception IncompatibleType of env * (ty * ty)
 exception IncompatibleForm of env * (form * form)
-
-module PE = EcPrinting
-
-let _ = EcPException.register (fun fmt exn ->
-  match exn with
-  | IncompatibleForm (env, (f1, f2)) ->
-      Format.fprintf fmt
-        "the formula %a is not compatible with %a\n%!"
-        (PE.pp_form (PE.PPEnv.ofenv env)) f1
-        (PE.pp_form (PE.PPEnv.ofenv env)) f2
-
-  | IncompatibleType (env, (t1, t2)) ->
-      Format.fprintf fmt
-        "the type %a is not compatible with %a\n%!"
-        (PE.pp_type (PE.PPEnv.ofenv env)) t1
-        (PE.pp_type (PE.PPEnv.ofenv env)) t2
-
-  | _ -> raise exn)
 
 (* -------------------------------------------------------------------- *)
 type 'a eqtest = env -> 'a -> 'a -> bool
@@ -142,6 +125,9 @@ module EqTest = struct
       | Etuple args1, Etuple args2 -> List.all2 (aux alpha) args1 args2
       | Eif (a1,b1,c1), Eif(a2,b2,c2) ->
           aux alpha a1 a2 && aux alpha b1 b2 && aux alpha c1 c2
+      | Ematch (e1,es1,ty1), Ematch(e2,es2,ty2) ->
+             for_type env ty1 ty2
+          && List.all2 (aux alpha) (e1::es1) (e2::es2)
       | _, _ -> false
     in
       fun e1 e2 -> aux Mid.empty e1 e2
@@ -196,9 +182,14 @@ type reduction_info = {
   delta_h : (ident -> bool);
   zeta    : bool;
   iota    : bool;
-  logic   : bool;
+  eta     : bool;
+  logic   : rlogic_info;
   modpath : bool;
 }
+
+and rlogic_info = [`Full | `ProductCompat] option
+
+(* -------------------------------------------------------------------- *)
 
 let full_red = {
   beta    = true;
@@ -206,7 +197,8 @@ let full_red = {
   delta_h = EcUtils.predT;
   zeta    = true;
   iota    = true;
-  logic   = true;
+  eta     = true;
+  logic   = Some `Full;
   modpath = true;
 }
 
@@ -216,7 +208,8 @@ let no_red = {
   delta_h = EcUtils.pred0;
   zeta    = false;
   iota    = false;
-  logic   = false;
+  eta     = false;
+  logic   = None;
   modpath = false;
 }
 
@@ -230,7 +223,7 @@ let nodelta =
 
 let reduce_local ri hyps x  =
   if   ri.delta_h x
-  then LDecl.reduce_var x hyps
+  then LDecl.unfold x hyps
   else raise NotReducible
 
 let reduce_op ri env p tys =
@@ -385,27 +378,35 @@ let rec h_red ri env hyps f =
         if pv_equal pv pv' then raise NotReducible else f_pvar pv' f.f_ty m
 
     (* logical reduction *)
-  | Fapp ({f_node = Fop (p, tys); } as fo, args) when ri.logic && is_logical_op p ->
+  | Fapp ({f_node = Fop (p, tys); } as fo, args)
+      when is_some ri.logic && is_logical_op p
+    ->
+     let pcompat =
+       match oget ri.logic with `Full -> true | `ProductCompat -> false
+     in
+
       let f' =
         match op_kind p, args with
-        | Some (`Not      ), [f1]    -> f_not_simpl f1
+        | Some (`Not), [f1]    when pcompat -> f_not_simpl f1
+        | Some (`Imp), [f1;f2] when pcompat -> f_imp_simpl f1 f2
+        | Some (`Iff), [f1;f2] when pcompat -> f_iff_simpl f1 f2
+
+
         | Some (`And `Asym), [f1;f2] -> f_anda_simpl f1 f2
         | Some (`Or  `Asym), [f1;f2] -> f_ora_simpl f1 f2
         | Some (`And `Sym ), [f1;f2] -> f_and_simpl f1 f2
         | Some (`Or  `Sym ), [f1;f2] -> f_or_simpl f1 f2
-        | Some (`Imp      ), [f1;f2] -> f_imp_simpl f1 f2
-        | Some (`Iff      ), [f1;f2] -> f_iff_simpl f1 f2
         | Some (`Int_le   ), [f1;f2] -> f_int_le_simpl f1 f2
         | Some (`Int_lt   ), [f1;f2] -> f_int_lt_simpl f1 f2
         | Some (`Real_le  ), [f1;f2] -> f_real_le_simpl f1 f2
         | Some (`Real_lt  ), [f1;f2] -> f_real_lt_simpl f1 f2
         | Some (`Int_add  ), [f1;f2] -> f_int_add_simpl f1 f2
-        | Some (`Int_sub  ), [f1;f2] -> f_int_sub_simpl f1 f2
+        | Some (`Int_opp  ), [f]     -> f_int_opp_simpl f
         | Some (`Int_mul  ), [f1;f2] -> f_int_mul_simpl f1 f2
         | Some (`Real_add ), [f1;f2] -> f_real_add_simpl f1 f2
-        | Some (`Real_sub ), [f1;f2] -> f_real_sub_simpl f1 f2
+        | Some (`Real_opp ), [f]     -> f_real_opp_simpl f
         | Some (`Real_mul ), [f1;f2] -> f_real_mul_simpl f1 f2
-        | Some (`Real_div ), [f1;f2] -> f_real_div_simpl f1 f2
+        | Some (`Real_inv ), [f]     -> f_real_inv_simpl f
         | Some (`Eq       ), [f1;f2] -> begin
             match fst_map f_node (destr_app f1), fst_map f_node (destr_app f2) with
             | (Fop (p1, _), args1), (Fop (p2, _), args2)
@@ -420,7 +421,16 @@ let rec h_red ri env hyps f =
                   then f_false
                   else f_ands (List.map2 f_eq args1 args2)
 
-            | _ -> f_eq_simpl f1 f2
+            | (_, []), (_, [])
+                when EqTest.for_type env f1.f_ty EcTypes.tunit
+                  && EqTest.for_type env f2.f_ty EcTypes.tunit ->
+
+                f_true
+
+            | _ ->
+               if   f_equal f1 f2 || is_alpha_eq hyps f1 f2
+               then f_true
+               else f_eq_simpl f1 f2
         end
 
         | _ when ri.delta_p p ->
@@ -442,6 +452,11 @@ let rec h_red ri env hyps f =
       let op = reduce_op ri env p tys in
       f_app_simpl op args f.f_ty
 
+    (* η-reduction *)
+  | Fquant (Llambda, [x, GTty _], { f_node = Fapp (f, [{ f_node = Flocal y }]) })
+      when id_equal x y && not (Mid.mem x f.f_fv)
+    -> f
+
     (* contextual rule - let *)
   | Flet (lp, f1, f2) -> f_let lp (h_red ri env hyps f1) f2
 
@@ -451,7 +466,7 @@ let rec h_red ri env hyps f =
 
     (* Contextual rule - bindings *)
   | Fquant (Lforall as t, b, f1)
-  | Fquant (Lexists as t, b, f1) -> begin
+  | Fquant (Lexists as t, b, f1) when ri.logic = Some `Full -> begin
       let ctor = match t with
         | Lforall -> f_forall_simpl
         | Lexists -> f_exists_simpl
@@ -478,7 +493,7 @@ and h_red_opt ri env hyps f =
   try Some (h_red ri env hyps f)
   with NotReducible -> None
 
-let check_alpha_equal ri hyps f1 f2 =
+and check_alpha_equal ri hyps f1 f2 =
   let env = LDecl.toenv hyps in
   let exn = IncompatibleForm (env, (f1, f2)) in
   let error () = raise exn in
@@ -573,7 +588,7 @@ let check_alpha_equal ri hyps f1 f2 =
       let (env,subst) = check_lpattern env subst p1 p2 in
       aux env subst g1 g2
 
-    | Fint i1, Fint i2 when i1 = i2 -> ()
+    | Fint i1, Fint i2 when EcBigInt.equal i1 i2 -> ()
 
     | Flocal id1, Flocal id2 -> check_local subst id1 f2 id2
 
@@ -663,10 +678,10 @@ let check_alpha_equal ri hyps f1 f2 =
         match h_red_opt ri env hyps f2 with
         | Some f2 -> aux env subst f1 f2
         | None ->
-          let ty,codom = 
+          let ty,codom =
             match f1.f_node, f2.f_node with
             | Fquant(Llambda,(_,GTty ty)::bd, f1'), _ ->
-              ty, toarrow (List.map (fun (_,gty)-> gty_as_ty gty) bd) f1'.f_ty 
+              ty, toarrow (List.map (fun (_,gty)-> gty_as_ty gty) bd) f1'.f_ty
             | _,  Fquant(Llambda,(_,GTty ty)::bd,f2') ->
               ty, toarrow (List.map (fun (_,gty)-> gty_as_ty gty) bd) f2'.f_ty
             | _, _ -> raise e in
@@ -677,10 +692,10 @@ let check_alpha_equal ri hyps f1 f2 =
   in
   aux env Fsubst.f_subst_id f1 f2
 
-let check_alpha_eq = check_alpha_equal no_red
-let check_conv     = check_alpha_equal full_red
+and check_alpha_eq f1 f2 = check_alpha_equal no_red   f1 f2
+and check_conv     f1 f2 = check_alpha_equal full_red f1 f2
 
-let is_alpha_eq hyps f1 f2 =
+and is_alpha_eq hyps f1 f2 =
   try check_alpha_eq hyps f1 f2; true
   with _ -> false
 
@@ -702,14 +717,14 @@ let rec simplify ri hyps f =
 and simplify_rec ri hyps f =
   match f.f_node with
 
-  | Fapp ({ f_node = Fop _ } as fo, args) -> 
+  | Fapp ({ f_node = Fop _ } as fo, args) ->
       let args' = List.map (simplify ri hyps) args in
       let app1  = (fo, args , f.f_ty) in
       let app2  = (fo, args', f.f_ty) in
       let f'    =  EcFol.FSmart.f_app (f, app1) app2 in
       (try h_red ri hyps f' with NotReducible -> f')
 
-  | FhoareF hf when ri.modpath -> 
+  | FhoareF hf when ri.modpath ->
       let hf_f = EcEnv.NormMp.norm_xfun (LDecl.toenv hyps) hf.hf_f in
       f_map (fun ty -> ty) (simplify ri hyps) (f_hoareF_r { hf with hf_f })
 
@@ -717,7 +732,7 @@ and simplify_rec ri hyps f =
       let bhf_f = EcEnv.NormMp.norm_xfun (LDecl.toenv hyps) hf.bhf_f in
       f_map (fun ty -> ty) (simplify ri hyps) (f_bdHoareF_r { hf with bhf_f })
 
-  | FequivF ef when ri.modpath -> 
+  | FequivF ef when ri.modpath ->
       let ef_fl = EcEnv.NormMp.norm_xfun (LDecl.toenv hyps) ef.ef_fl in
       let ef_fr = EcEnv.NormMp.norm_xfun (LDecl.toenv hyps) ef.ef_fr in
       f_map (fun ty -> ty) (simplify ri hyps) (f_equivF_r { ef with ef_fl; ef_fr; })
@@ -727,7 +742,7 @@ and simplify_rec ri hyps f =
       let eg_fr = EcEnv.NormMp.norm_xfun (LDecl.toenv hyps) eg.eg_fr in
       f_map (fun ty -> ty) (simplify ri hyps) (f_eagerF_r { eg with eg_fl ; eg_fr; })
 
-  | Fpr pr  when ri.modpath -> 
+  | Fpr pr  when ri.modpath ->
       let pr_fun = EcEnv.NormMp.norm_xfun (LDecl.toenv hyps) pr.pr_fun in
       f_map (fun ty -> ty) (simplify ri hyps) (f_pr_r { pr with pr_fun })
 

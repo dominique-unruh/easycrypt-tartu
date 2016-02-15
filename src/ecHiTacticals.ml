@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -68,29 +70,32 @@ and process1_idtac (_ : ttenv) (msg : string option) (tc : tcenv1) =
   EcLowGoal.t_id tc
 
 (* -------------------------------------------------------------------- *)
-and process1_case (_ : ttenv) (opts, gp) (tc : tcenv1) =
+and process1_case (_ : ttenv) (doeq, opts, gp) (tc : tcenv1) =
   let opts = CaseOptions.merge CaseOptions.default opts in
 
   let form_of_gp () =
-    match gp with
-    | [`Form (occ, pf)] -> begin
-        match occ with
-        | None   -> pf
-        | Some _ -> tc_error !!tc "cannot specify an occurence selector"
-    end
+    match gp.pr_rev with
+    | { pr_clear = []; pr_genp = [`Form (occ, pf)] }
+        when List.is_empty gp.pr_view ->
+     begin
+       match occ with
+       | None when not doeq -> pf
+       | _ -> tc_error !!tc
+          "cannot specify an occurence selector, nor eq. generation"
+     end
 
     | _ -> tc_error !!tc "must give exactly one boolean formula"
   in
     match (FApi.tc1_goal tc).f_node with
     | FbdHoareS _ | FhoareS _ when not opts.cod_ambient ->
-        let fp = TTC.tc1_process_phl_formula tc (form_of_gp ()) in
+        let fp = TTC.tc1_process_Xhl_formula tc (form_of_gp ()) in
         EcPhlCase.t_hl_case fp tc
 
     | FequivS _ when not opts.cod_ambient ->
         let fp = TTC.tc1_process_prhl_formula tc (form_of_gp ()) in
         EcPhlCase.t_equiv_case fp tc
 
-    | _ -> EcHiGoal.process_case gp tc
+    | _ -> EcHiGoal.process_case ~doeq gp tc
 
 (* -------------------------------------------------------------------- *)
 and process1_progress (ttenv : ttenv) options t (tc : tcenv1) =
@@ -102,7 +107,7 @@ and process1_progress (ttenv : ttenv) options t (tc : tcenv1) =
       options in
 
   FApi.t_seq
-    EcPhlAuto.t_trivial
+    EcHiGoal.process_trivial
     (EcLowGoal.t_progress ~options t)
     tc
 
@@ -125,11 +130,10 @@ and process1_logic (ttenv : ttenv) (t : logtactic located) (tc : tcenv1) =
     | Preflexivity      -> process_reflexivity
     | Passumption       -> process_assumption
     | Psmt pi           -> process_smt ~loc:(loc t) ttenv pi
-    | Pintro pi         -> process_intros pi
     | Psplit            -> process_split
     | Pfield st         -> process_algebra `Solve `Field st
     | Pring st          -> process_algebra `Solve `Ring  st
-    | Palg_norm         -> EcStrongRing.t_alg_eq 
+    | Palg_norm         -> EcStrongRing.t_alg_eq
     | Pexists fs        -> process_exists fs
     | Pleft             -> process_left
     | Pright            -> process_right
@@ -137,12 +141,11 @@ and process1_logic (ttenv : ttenv) (t : logtactic located) (tc : tcenv1) =
     | Ptrivial          -> process_trivial
     | Pelim pe          -> process_elim pe
     | Papply pe         -> process_apply ~implicits:ttenv.tt_implicits pe
-    | Pcut (ip, f, t)   -> process_cut engine (ip, f, t)
-    | Pcutdef (ip, f)   -> process_cutdef (ip, f)
-    | Pgeneralize l     -> process_generalize l
-    | Pmove (v, l)      -> process_move v l
+    | Pcut (m, ip, f, t)-> process_cut ~mode:m engine ttenv (ip, f, t)
+    | Pcutdef (ip, f)   -> process_cutdef ttenv (ip, f)
+    | Pmove pr          -> process_move pr.pr_view pr.pr_rev
     | Pclear l          -> process_clear l
-    | Prewrite ri       -> process_rewrite ttenv ri
+    | Prewrite (ri, x)  -> process_rewrite ttenv ?target:x ri
     | Psubst   ri       -> process_subst ri
     | Psimplify ri      -> process_simplify ri
     | Pchange pf        -> process_change pf
@@ -179,7 +182,7 @@ and process1_phl (_ : ttenv) (t : phltactic located) (tc : tcenv1) =
     | Palias info               -> EcPhlCodeTx.process_alias info
     | Pset info                 -> EcPhlCodeTx.process_set info
     | Prnd (side, info)         -> EcPhlRnd.process_rnd side info
-    | Pconseq (nm, info)        -> EcPhlConseq.process_conseq nm info
+    | Pconseq (opt, info)       -> EcPhlConseq.process_conseq_opt opt info
     | Phrex_elim                -> EcPhlExists.t_hr_exists_elim
     | Phrex_intro fs            -> EcPhlExists.process_exists_intro fs
     | Pexfalso                  -> EcPhlAuto.t_exfalso
@@ -209,7 +212,7 @@ and process1_phl (_ : ttenv) (t : phltactic located) (tc : tcenv1) =
   | EcLowPhlGoal.InvalidSplit (i, lo, hi) ->
       tc_error_lazy !!tc (fun fmt ->
         Format.fprintf fmt
-          "invalid split index: %d is not in the interval [%d..%d]" 
+          "invalid split index: %d is not in the interval [%d..%d]"
           i lo hi)
 
 (* -------------------------------------------------------------------- *)
@@ -225,7 +228,7 @@ and process_sub (ttenv : ttenv) tts tc =
 and process_fsub (ttenv : ttenv) (ts, t) tc =
   let ts = List.map (fst_map (process_tfocus tc)) ts in
   let tx i =
-    ts 
+    ts
       |> List.ofind (fun (p, _) -> p i)
       |> (function Some (_, t) -> Some t | _ -> t)
       |> omap (process1 ttenv)
@@ -299,16 +302,13 @@ and process_core (ttenv : ttenv) ({ pl_loc = loc } as t : ptactic_core) (tc : tc
 and process (ttenv : ttenv) (t : ptactic) (tc : tcenv) =
   let cf =
     match unloc t.pt_core with
-    | Plogic Pintro _
-    | Plogic (Prewrite _)
-    | Plogic (Pgeneralize _ )
     | Plogic (Pmove _)
     | Pidtac _ -> true
     | _ -> false
   in
 
   let tc = process_core ttenv t.pt_core tc in
-  let tc = EcHiGoal.process_mintros ~cf t.pt_intros tc in
+  let tc = EcHiGoal.process_mgenintros ~cf ttenv t.pt_intros tc in
     tc
 
 (* -------------------------------------------------------------------- *)
@@ -321,5 +321,8 @@ and process1 (ttenv : ttenv) (t : ptactic) (tc : tcenv1) =
 
 (* -------------------------------------------------------------------- *)
 let process (ttenv : ttenv) (t : ptactic list) (pf : proof) =
-  let tc = tcenv1_of_proof pf in
-  proof_of_tcenv (process1_seq ttenv t tc)
+  let tc  = tcenv1_of_proof pf in
+  let hd  = FApi.tc1_handle tc in
+  let tc  = process1_seq ttenv t tc in
+  let hds = FApi.tc_opened tc in
+  ((hd, hds), proof_of_tcenv tc)

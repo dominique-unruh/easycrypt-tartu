@@ -5,8 +5,8 @@ op sample : t distr.
 axiom lossless : weight sample = 1%r.
 op test : t -> bool.
 
-module Sample = { 
-  proc sample () : t = { 
+module Sample = {
+  proc sample () : t = {
     var r : t;
     r = $sample;
     while (test r) {
@@ -24,11 +24,11 @@ proof.
  seq 1 : true => //.
   rnd;skip;smt.
  while true (if test r then 1 else 0) 1 (mu sample (predC test)) => //;first smt.
-  intros Hrec.
+  move=> Hrec.
   seq 1 : true => //.
   by rnd;skip;smt.
-  by rnd;skip;smt. 
-  split;[apply pr_ntest |  intros z].
-  conseq * (_ : true ==> (predC test) r);first smt.
+  by rnd;skip;smt.
+  split;[apply pr_ntest |  move=> z].
+  conseq (_ : true ==> (predC test) r);first smt.
  rnd;skip;progress;apply mu_sub => x //.
 qed.

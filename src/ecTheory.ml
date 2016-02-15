@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -28,6 +30,7 @@ and theory_item =
   | Th_typeclass of (symbol * typeclass)
   | Th_baserw    of symbol
   | Th_addrw     of EcPath.path * EcPath.path list
+  | Th_auto      of (bool * Sp.t)
 
 and tcinstance = [ `Ring of ring | `Field of field | `General of path ]
 and thmode     = [ `Abstract | `Concrete ]
@@ -56,6 +59,7 @@ and ctheory_item =
   | CTh_typeclass of (symbol * typeclass)
   | CTh_baserw    of symbol
   | CTh_addrw     of EcPath.path * EcPath.path list
+  | CTh_auto      of (bool * Sp.t)
 
 and ctheory_clone = {
   cthc_base : EcPath.path;
@@ -69,7 +73,7 @@ and ctheory_override =
 let module_comps_of_module_sig_comps (comps : module_sig_body) =
   let onitem = function
     | Tys_function(funsig, oi) ->
-        MI_Function { 
+        MI_Function {
           f_name = funsig.fs_name;
           f_sig  = funsig;
           f_def  = FBabs oi;

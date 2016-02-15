@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -86,9 +88,8 @@ let print_config config =
   Format.eprintf "System PATH:@\n%!";
   List.iter
     (fun x -> Format.eprintf "  %s@\n%!" x)
-    (Str.split
-       (Str.regexp (Str.quote psep))
-       (try Sys.getenv "PATH" with Not_found -> ""))
+    (Pcre.split ~pat:(Pcre.quote psep)
+      (try Sys.getenv "PATH" with Not_found -> ""))
 
 let _ = Sys.catch_break true;;
 (*let _ = Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
@@ -101,8 +102,8 @@ let _ =
   and mydir   = Filename.dirname  Sys.executable_name in
 
   let eclocal =
-    let re = Str.regexp "^ec\\.\\(native\\|byte\\)\\(\\.exe\\)?$" in
-    Str.string_match re myname 0
+    let rex = Pcre.regexp "^ec\\.(?:native|byte)(?:\\.exe)?$" in
+    Pcre.pmatch ~rex myname
   in
 
   let bin =
@@ -142,7 +143,7 @@ let _ =
     let module E = struct exception Found of string end in
 
     let rootdir = resource ["_tools"] in
-    let regexp  = Str.regexp "^ocaml-[0-9.]+$" in
+    let regexp  = Pcre.regexp "^ocaml-[0-9.]+$" in
 
     if Sys.file_exists rootdir && Sys.is_directory rootdir then begin
       let dirs = Sys.readdir rootdir in
@@ -151,7 +152,7 @@ let _ =
         for i = 0 to (Array.length dirs) - 1 do
           let target = Filename.concat rootdir dirs.(i) in
             if Sys.is_directory target then
-              if Str.string_match regexp dirs.(i) 0 then
+              if Pcre.pmatch ~rex:regexp dirs.(i) then
                 raise (E.Found target)
         done
       with E.Found target ->
@@ -186,7 +187,7 @@ let _ =
         | true  -> Some why3conf
     end
     | why3conf -> why3conf
-  
+
   and ovrevict = options.o_options.o_ovrevict in
 
   begin
@@ -210,6 +211,9 @@ let _ =
     List.iter EcCommands.addidir ldropts.ldro_idirs;
   end;
 
+  (* Register user messages printers *)
+  begin let open EcUserMessages in register () end;
+
   (* Initialize I/O + interaction module *)
   let (prvopts, input, terminal, interactive) =
     match options.o_command with
@@ -218,7 +222,7 @@ let _ =
           pc_why3     = why3conf;
           pc_pwrapper = pwrapper;
           pc_loadpath = EcCommands.loadpath ();
-        } in 
+        } in
 
         print_config config; exit 0
 
@@ -232,10 +236,13 @@ let _ =
     end
 
     | `Compile cmpopts -> begin
-        let input = cmpopts.cmpo_input in
-        let terminal = lazy (EcTerminal.from_channel ~name:input (open_in input)) in
-        ({cmpopts.cmpo_provers with prvo_iterate = true}, 
-         Some input, terminal, false)
+        let name     = cmpopts.cmpo_input in
+        let gcstats  = cmpopts.cmpo_gcstats in
+        let terminal =
+          lazy (EcTerminal.from_channel ~name ~gcstats (open_in name))
+        in
+          ({cmpopts.cmpo_provers with prvo_iterate = true},
+           Some name, terminal, false)
     end
   in
 
@@ -245,30 +252,6 @@ let _ =
        match relocdir with
        | None     -> EcCommands.addidir Filename.current_dir_name
        | Some pwd -> EcCommands.addidir pwd);
-
-  (* Initialize global scope *)
-  begin
-    let checkmode = {
-      EcCommands.cm_checkall  = prvopts.prvo_checkall;
-      EcCommands.cm_timeout   = prvopts.prvo_timeout;
-      EcCommands.cm_cpufactor = prvopts.prvo_cpufactor;
-      EcCommands.cm_nprovers  = prvopts.prvo_maxjobs;
-      EcCommands.cm_provers   = prvopts.prvo_provers;
-      EcCommands.cm_wrapper   = pwrapper;
-      EcCommands.cm_profile   = prvopts.prvo_profile;
-      EcCommands.cm_oldsmt    = prvopts.prvo_oldsmt;
-      EcCommands.cm_iterate   = prvopts.prvo_iterate;
-    } in
-
-    EcCommands.initialize ~undo:interactive ~boot:ldropts.ldro_boot ~checkmode
-  end;
-
-  begin
-    try
-      List.iter EcCommands.apply_pragma prvopts.prvo_pragmas
-    with EcCommands.InvalidPragma x ->
-      (Printf.eprintf "invalid pragma: `%s'\n%!" x; exit 1)
-  end;
 
   (* Instantiate terminal *)
   let lazy terminal = terminal in
@@ -284,17 +267,47 @@ let _ =
     EcTerminal.notice ~immediate:true `Warning copyright terminal;
 
   try
-    begin
-      let notifier (lvl : EcGState.loglevel) (lazy msg) =
-        EcTerminal.notice ~immediate:true lvl msg terminal
-      in EcCommands.addnotifier notifier
-    end;
+    if EcTerminal.interactive terminal then Sys.catch_break true;
 
     (* Interaction loop *)
+    let first = ref `Init in
+
     while true do
       let terminate = ref false in
 
       try
+        begin match !first with
+        | `Init | `Restart ->
+            let restart = (!first = `Restart) in
+
+            (* Initialize global scope *)
+            let checkmode = {
+              EcCommands.cm_checkall  = prvopts.prvo_checkall;
+              EcCommands.cm_timeout   = prvopts.prvo_timeout;
+              EcCommands.cm_cpufactor = prvopts.prvo_cpufactor;
+              EcCommands.cm_nprovers  = prvopts.prvo_maxjobs;
+              EcCommands.cm_provers   = prvopts.prvo_provers;
+              EcCommands.cm_wrapper   = pwrapper;
+              EcCommands.cm_profile   = prvopts.prvo_profile;
+              EcCommands.cm_iterate   = prvopts.prvo_iterate;
+            } in
+
+            EcCommands.initialize ~restart
+              ~undo:interactive ~boot:ldropts.ldro_boot ~checkmode;
+            (try
+               List.iter EcCommands.apply_pragma prvopts.prvo_pragmas
+             with EcCommands.InvalidPragma x ->
+               EcScope.hierror "invalid pragma: `%s'\n%!" x);
+
+            let notifier (lvl : EcGState.loglevel) (lazy msg) =
+              EcTerminal.notice ~immediate:true lvl msg terminal
+            in EcCommands.addnotifier notifier;
+
+            first := `Loop
+
+        | `Loop -> ()
+        end;
+
         begin
           match EcLocation.unloc (EcTerminal.next terminal) with
           | EP.P_Prog (commands, locterm) ->
@@ -303,7 +316,10 @@ let _ =
                 (fun p ->
                    let loc = p.EP.gl_action.EcLocation.pl_loc in
                      try  EcCommands.process ~timed:p.EP.gl_timed p.EP.gl_action
-                     with e -> begin
+                     with
+                     | EcCommands.Restart ->
+                         raise EcCommands.Restart
+                     | e -> begin
                        if Printexc.backtrace_status () then begin
                          if not (EcTerminal.interactive terminal) then
                            Printf.fprintf stderr "%t\n%!" Printexc.print_backtrace
@@ -317,13 +333,17 @@ let _ =
         end;
         EcTerminal.finish `ST_Ok terminal;
         if !terminate then (EcTerminal.finalize terminal; exit 0);
-      with e -> begin
-        EcTerminal.finish
-          (`ST_Failure (EcScope.toperror_of_exn e))
-          terminal;
-        if not (EcTerminal.interactive terminal) then
-          exit 1
-      end
+      with
+      | EcCommands.Restart ->
+          first := `Restart
+
+      | e -> begin
+          EcTerminal.finish
+            (`ST_Failure (EcScope.toperror_of_exn e))
+            terminal;
+          if (!first = `Init) || not (EcTerminal.interactive terminal) then
+            exit 1
+        end
     done
   with e ->
     (try EcTerminal.finalize terminal with _ -> ());

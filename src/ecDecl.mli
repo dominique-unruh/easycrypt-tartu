@@ -1,10 +1,13 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
 open EcUtils
+open EcSymbols
 open EcBigInt
 open EcPath
 open EcTypes
@@ -13,6 +16,7 @@ open EcCoreFol
 (* -------------------------------------------------------------------- *)
 type ty_param  = EcIdent.t * EcPath.Sp.t
 type ty_params = ty_param list
+type ty_pctor  = [ `Int of int | `Named of ty_params ]
 
 type tydecl = {
   tyd_params : ty_params;
@@ -37,12 +41,17 @@ val tydecl_as_abstract : tydecl -> Sp.t
 val tydecl_as_datatype : tydecl -> ty_dtype
 val tydecl_as_record   : tydecl -> form * (EcSymbols.symbol * EcTypes.ty) list
 
+val abs_tydecl : ?tc:Sp.t -> ?params:ty_pctor -> unit -> tydecl
+
+val ty_instanciate : ty_params -> ty list -> ty -> ty
+
 (* -------------------------------------------------------------------- *)
 type locals = EcIdent.t list
 
-type operator_kind = 
+type operator_kind =
   | OB_oper of opbody option
-  | OB_pred of form option
+  | OB_pred of prbody option
+  | OB_nott of notation
 
 and opbody =
   | OP_Plain  of EcTypes.expr
@@ -51,6 +60,10 @@ and opbody =
   | OP_Proj   of EcPath.path * int * int
   | OP_Fix    of opfix
   | OP_TC
+
+and prbody =
+  | PR_Plain of form
+  | PR_Ind   of prind
 
 and opfix = {
   opf_args     : (EcIdent.t * EcTypes.ty) list;
@@ -68,37 +81,66 @@ and opbranch = {
   opb_sub  : opbranches;
 }
 
+and notation = {
+  ont_args  : (EcIdent.t * EcTypes.ty) list;
+  ont_resty : EcTypes.ty;
+  ont_body  : expr;
+  ont_ponly : bool;
+}
+
+and prind = {
+  pri_args  : (EcIdent.t * EcTypes.ty) list;
+  pri_ctors : prctor list;
+}
+
+and prctor = {
+  prc_ctor : symbol;
+  prc_bds  : (EcIdent.t * gty) list;
+  prc_spec : form list;
+}
+
 type operator = {
   op_tparams : ty_params;
-  op_ty      : EcTypes.ty;        
+  op_ty      : EcTypes.ty;
   op_kind    : operator_kind;
 }
 
-val op_ty   : operator -> ty
-val is_pred : operator -> bool
-val is_oper : operator -> bool
-val is_ctor : operator -> bool
-val is_proj : operator -> bool
-val is_rcrd : operator -> bool
-val is_fix  : operator -> bool
+val op_ty     : operator -> ty
+val is_pred   : operator -> bool
+val is_oper   : operator -> bool
+val is_ctor   : operator -> bool
+val is_proj   : operator -> bool
+val is_rcrd   : operator -> bool
+val is_fix    : operator -> bool
+val is_abbrev : operator -> bool
+val is_prind  : operator -> bool
 
 val mk_op   : ty_params -> ty -> opbody option -> operator
-val mk_pred : ty_params -> ty list -> form option -> operator
+val mk_pred : ty_params -> ty list -> prbody option -> operator
 
-val operator_as_ctor : operator -> EcPath.path * int
-val operator_as_rcrd : operator -> EcPath.path
-val operator_as_proj : operator -> EcPath.path * int * int
-val operator_as_fix  : operator -> opfix
+val mk_abbrev :
+     ?ponly:bool -> ty_params -> (EcIdent.ident * ty) list
+  -> ty * expr -> operator
+
+val operator_as_ctor  : operator -> EcPath.path * int
+val operator_as_rcrd  : operator -> EcPath.path
+val operator_as_proj  : operator -> EcPath.path * int * int
+val operator_as_fix   : operator -> opfix
+val operator_as_prind : operator -> prind
 
 (* -------------------------------------------------------------------- *)
-type axiom_kind = [`Axiom | `Lemma]
+type axiom_kind = [`Axiom of (Ssym.t * bool) | `Lemma]
 
 type axiom = {
   ax_tparams : ty_params;
-  ax_spec    : form option;
+  ax_spec    : form;
   ax_kind    : axiom_kind;
   ax_nosmt   : bool;
 }
+
+(* -------------------------------------------------------------------- *)
+val is_axiom : axiom_kind -> bool
+val is_lemma : axiom_kind -> bool
 
 (* -------------------------------------------------------------------- *)
 val axiomatized_op :

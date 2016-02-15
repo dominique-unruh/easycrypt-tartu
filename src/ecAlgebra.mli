@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -59,7 +61,7 @@ type cfield
 
 val cring_of_ring   : ring  -> cring
 val cfield_of_field : field -> cfield
-val ring_of_cring   : cring -> ring 
+val ring_of_cring   : cring -> ring
 val field_of_cfield : cfield-> field
 
 (* -------------------------------------------------------------------- *)

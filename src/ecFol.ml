@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -12,6 +14,7 @@ open EcMemory
 open EcBigInt.Notations
 
 module BI = EcBigInt
+module CI = EcCoreLib
 
 (* -------------------------------------------------------------------- *)
 include EcCoreFol
@@ -50,7 +53,9 @@ let f_eqglob mp1 m1 mp2 m2 =
   f_eq (f_glob mp1 m1) (f_glob mp2 m2)
 
 (* -------------------------------------------------------------------- *)
-let f_op_real_of_int = f_op EcCoreLib.CI_Real.p_real_of_int [] (tfun tint treal) (* CORELIB *)
+let f_op_real_of_int = (* CORELIB *)
+  f_op CI.CI_Real.p_real_of_int [] (tfun tint treal)
+
 let f_real_of_int f  = f_app f_op_real_of_int [f] treal
 let f_rint n         = f_real_of_int (f_int n)
 
@@ -63,60 +68,62 @@ let destr_rint f =
       try destr_int f1 with DestrError _ -> destr_error "destr_rint"
   end
 
+  | Fop (p, _) when EcPath.p_equal p CI.CI_Real.p_real0 -> BI.zero
+  | Fop (p, _) when EcPath.p_equal p CI.CI_Real.p_real1 -> BI.one
+
   | _ -> destr_error "destr_rint"
 
 (* -------------------------------------------------------------------- *)
-let tfset ty = tconstr EcCoreLib.CI_FSet.p_fset [ty] (* CORELIB *)
-
-let fop_int_le     = f_op EcCoreLib.CI_Int .p_int_le    [] (tfun tint  (tfun tint tbool))        (* CORELIB *)
-let fop_int_lt     = f_op EcCoreLib.CI_Int .p_int_lt    [] (tfun tint  (tfun tint tbool))        (* CORELIB *)
-let fop_real_le    = f_op EcCoreLib.CI_Real.p_real_le   [] (tfun treal (tfun treal tbool))       (* CORELIB *)
-let fop_real_lt    = f_op EcCoreLib.CI_Real.p_real_lt   [] (tfun treal (tfun treal tbool))       (* CORELIB *)
-let fop_real_add   = f_op EcCoreLib.CI_Real.p_real_add  [] (tfun treal (tfun treal treal))       (* CORELIB *)
-let fop_real_sub   = f_op EcCoreLib.CI_Real.p_real_sub  [] (tfun treal (tfun treal treal))       (* CORELIB *)
-let fop_real_mul   = f_op EcCoreLib.CI_Real.p_real_mul  [] (tfun treal (tfun treal treal))       (* CORELIB *)
-let fop_real_div   = f_op EcCoreLib.CI_Real.p_real_div  [] (tfun treal (tfun treal treal))       (* CORELIB *)
-let fop_int_intval = f_op EcCoreLib.CI_Sum .p_int_intval [] (tfun tint (tfun tint (tfset tint))) (* CORELIB *)
+let fop_int_le     = f_op CI.CI_Int .p_int_le    [] (toarrow [tint ; tint ] tbool)
+let fop_int_lt     = f_op CI.CI_Int .p_int_lt    [] (toarrow [tint ; tint ] tbool)
+let fop_real_le    = f_op CI.CI_Real.p_real_le   [] (toarrow [treal; treal] tbool)
+let fop_real_lt    = f_op CI.CI_Real.p_real_lt   [] (toarrow [treal; treal] tbool)
+let fop_real_add   = f_op CI.CI_Real.p_real_add  [] (toarrow [treal; treal] treal)
+let fop_real_opp   = f_op CI.CI_Real.p_real_opp  [] (toarrow [treal] treal)
+let fop_real_mul   = f_op CI.CI_Real.p_real_mul  [] (toarrow [treal; treal] treal)
+let fop_real_inv   = f_op CI.CI_Real.p_real_inv  [] (toarrow [treal]        treal)
+let fop_real_abs   = f_op CI.CI_Real.p_real_abs  [] (toarrow [treal]        treal)
 
 let f_int_le f1 f2 = f_app fop_int_le [f1; f2] tbool
 let f_int_lt f1 f2 = f_app fop_int_lt [f1; f2] tbool
-
-let f_int_intval k1 k2 =
-  f_app fop_int_intval [k1;k2] (tfset tint)
-
-(* -------------------------------------------------------------------- *)
-let fop_int_sum =                       (* CORELIB *)
-  f_op EcCoreLib.CI_Sum.p_int_sum [] (tfun (tfun tint treal) (tfun (tfset tint) treal))
-
-let f_int_sum op intval ty =
-  f_app fop_int_sum [op;intval] ty
 
 (* -------------------------------------------------------------------- *)
 let f_real_le  f1 f2 = f_app fop_real_le  [f1; f2] tbool
 let f_real_lt  f1 f2 = f_app fop_real_lt  [f1; f2] tbool
 let f_real_add f1 f2 = f_app fop_real_add [f1; f2] treal
-let f_real_sub f1 f2 = f_app fop_real_sub [f1; f2] treal
+let f_real_opp f     = f_app fop_real_opp [f]      treal
 let f_real_mul f1 f2 = f_app fop_real_mul [f1; f2] treal
-let f_real_div f1 f2 = f_app fop_real_div [f1; f2] treal
+let f_real_inv f     = f_app fop_real_inv [f]      treal
+let f_real_abs f     = f_app fop_real_abs [f]      treal
+
+let f_real_sub f1 f2 =
+  f_real_add f1 (f_real_opp f2)
+
+let f_real_div f1 f2 =
+  f_real_mul f1 (f_real_inv f2)
 
 (* -------------------------------------------------------------------- *)
-let fop_in_supp ty = f_op EcCoreLib.CI_Distr.p_in_supp [ty] (toarrow [ty; tdistr ty] tbool) (* CORELIB *)
-let fop_mu_x    ty = f_op EcCoreLib.CI_Distr.p_mu_x    [ty] (toarrow [tdistr ty; ty] treal) (* CORELIB *)
-let fop_mu      ty = f_op EcCoreLib.CI_Distr.p_mu      [ty] (toarrow [tdistr ty; tcpred ty] treal) (* CORELIB *)
+let fop_in_supp ty = f_op CI.CI_Distr.p_in_supp [ty] (toarrow [ty; tdistr ty] tbool)
+let fop_mu_x    ty = f_op CI.CI_Distr.p_mu_x    [ty] (toarrow [tdistr ty; ty] treal)
+let fop_mu      ty = f_op CI.CI_Distr.p_mu      [ty] (toarrow [tdistr ty; tcpred ty] treal)
 
 let f_in_supp f1 f2 = f_app (fop_in_supp f1.f_ty) [f1; f2] tbool
 let f_mu_x    f1 f2 = f_app (fop_mu_x f2.f_ty) [f1; f2] treal
 
-let proj_distr_ty env ty = 
+let proj_distr_ty env ty =
    match (EcEnv.Ty.hnorm ty env).ty_node with
-  | Tconstr(_,lty) when List.length lty = 1  -> 
+  | Tconstr(_,lty) when List.length lty = 1  ->
     List.hd lty
-  | _ -> assert false 
+  | _ -> assert false
 
-let f_mu  env f1 f2 = f_app (fop_mu (proj_distr_ty env f1.f_ty)) [f1; f2] treal
+let f_mu env f1 f2 =
+  f_app (fop_mu (proj_distr_ty env f1.f_ty)) [f1; f2] treal
 
-let fop_weight ty = f_op EcCoreLib.CI_Distr.p_weight [ty] (tfun (tdistr ty) treal) (* CORELIB *)
-let f_weight ty d = f_app (fop_weight ty) [d] treal
+let fop_weight ty = (* CORELIB *)
+  f_op CI.CI_Distr.p_weight [ty] (tfun (tdistr ty) treal)
+
+let f_weight ty d =
+  f_app (fop_weight ty) [d] treal
 
 (* -------------------------------------------------------------------- *)
 let f_losslessF f = f_bdHoareF f_true f f_true FHeq f_r1
@@ -137,15 +144,14 @@ let f_int_add_simpl f1 f2 =
   with DestrError _ ->
          if f_equal f_i0 f1 then f2
     else if f_equal f_i0 f2 then f1
-    else f_int_add f1 f2
+    else match f2.f_node with
+    | Fapp (op, [f2])
+         when f_equal op fop_int_opp && f_equal f1 f2
+      -> f_i0
+    | _ -> f_int_add f1 f2
 
 let f_int_sub_simpl f1 f2 =
-  if f_equal f1 f2 then f_i0 else
-  try  f_int (destr_int f1 -^ destr_int f2)
-  with DestrError _ ->
-         if f_equal f_i0 f1 then f_int_opp_simpl f2
-    else if f_equal f_i0 f2 then f1
-    else f_int_sub f1 f2
+  f_int_add_simpl f1 (f_int_opp_simpl f2)
 
 let f_int_mul_simpl f1 f2 =
   try  f_int (destr_int f1 *^ destr_int f2)
@@ -156,17 +162,65 @@ let f_int_mul_simpl f1 f2 =
     else f_int_mul f1 f2
 
 (* -------------------------------------------------------------------- *)
-let destr_rdivint f =
+let destr_rdivint =
+  let rec aux isneg f =
+    let renorm (n, d) =
+      if isneg then (BI.neg n, d) else (n, d)
+    in
+
+    match f.f_node with
+    | Fapp (op, [f1; { f_node = Fapp (subop, [f2]) }])
+        when f_equal    op fop_real_mul
+          && f_equal subop fop_real_inv -> begin
+        let n1, n2 =
+          try  (destr_rint f1, destr_rint f2)
+          with DestrError _ -> destr_error "rdivint"
+        in renorm (n1, n2)
+      end
+  
+    | Fapp (op, [f]) when f_equal op fop_real_inv -> begin
+        try
+          renorm (BI.one, destr_rint f)
+        with DestrError _ -> destr_error "rdivint"
+      end
+
+    | Fapp (op, [f]) when f_equal op fop_real_opp ->
+       aux (not isneg) f
+  
+    | _ ->
+       try  renorm (destr_rint f, BI.one)
+       with DestrError _ -> destr_error "rdivint"
+
+  in fun f -> aux false f
+
+let real_split f =
   match f.f_node with
-  | Fapp (op, [f1; f2]) when f_equal op fop_real_div -> begin
-      try  (destr_rint f1, destr_rint f2)
-      with DestrError _ -> destr_error "rdivint"
-  end
-  | _ -> destr_error "rdivint"
+  | Fapp (op, [f1; { f_node = Fapp (subop, [f2]) }])
+      when f_equal    op fop_real_mul
+        && f_equal subop fop_real_inv
+    -> (f1, f2)
+
+  | Fapp (op, [{ f_node = Fapp (subop, [f1]) }; f2])
+      when f_equal    op fop_real_mul
+        && f_equal subop fop_real_inv
+    -> (f2, f1)
+
+  | Fapp (op, [f]) when f_equal op fop_real_inv ->
+     (f_r1, f)
+
+  | _ ->
+     (f, f_r1)
+
+and real_is_zero f =
+  try  BI.equal BI.zero (destr_rint f)
+  with DestrError _ -> false
+
+and real_is_one f =
+  try  BI.equal BI.one (destr_rint f)
+  with DestrError _ -> false
 
 let norm_real_int_div n1 n2 =
-  if BI.sign n2 = 0 then f_real_div (f_rint n1) (f_rint n2) else
-  if BI.sign n1 = 0 then f_r0 else
+  if BI.sign n1 = 0 || BI.sign n2 = 0 then f_r0 else
 
   let n1, n2 =
     match BI.gcd n1 n2 with
@@ -175,75 +229,94 @@ let norm_real_int_div n1 n2 =
   in
        if BI.equal n1 BI.zero then f_r0
   else if BI.equal n2 BI.one  then f_rint n1
-  else if BI.sign  n2 < 0     then f_real_div (f_rint (~^n1)) (f_rint (~^n2))
-  else f_real_div (f_rint n1) (f_rint n2)
+  else
+
+  let s = (BI.sign n1) * (BI.sign n2) in
+  let f = f_real_div (f_rint n1) (f_rint n2) in
+
+  if s < 0 then f_real_opp f else f
 
 let f_real_add_simpl f1 f2 =
   try  f_rint (destr_rint f1 +^ destr_rint f2)
   with DestrError _ ->
     try
-      let (n1, d1), (n2, d2) = destr_rdivint f1, destr_rdivint f2 in
-      if   BI.sign d1 = 0 || BI.sign d2 = 0
-      then norm_real_int_div (n1 *^ n2) BI.zero
-      else norm_real_int_div (n1*^d2 +^ n2*^d1) (d1*^d2)
+      let (n1, d1) = destr_rdivint f1 in
+      let (n2, d2) = destr_rdivint f2 in
+
+      if BI.sign d1 = 0 || BI.sign d2 = 0 then f_r0 else
+
+      norm_real_int_div (n1*^d2 +^ n2*^d1) (d1*^d2)
+
     with DestrError _ ->
-           if f_equal f_r0 f1 then f2
-      else if f_equal f_r0 f2 then f1
-      else f_real_add f1 f2
+           if real_is_zero f1 then f2
+      else if real_is_zero f2 then f1
+      else match f2.f_node with
+      | Fapp (op, [f2])
+           when f_equal op fop_real_opp && f_equal f1 f2
+        -> f_r0
+      | _ -> f_real_add f1 f2
+
+let f_real_opp_simpl f =
+  match f.f_node with
+  | Fapp (op, [f]) when f_equal op fop_real_opp -> f
+  | _ -> if real_is_zero f then f_r0 else f_real_opp f
 
 let f_real_sub_simpl f1 f2 =
-  try  f_rint (destr_rint f1 -^ destr_rint f2)
-  with DestrError _ ->
-    try
-      let (n1, d1), (n2, d2) = destr_rdivint f1, destr_rdivint f2 in
-      if   BI.sign d1 = 0 || BI.sign d2 = 0
-      then norm_real_int_div (n1 -^ n2) BI.zero
-      else norm_real_int_div (n1*^d2 -^ n2*^d1) (d1*^d2)
-    with DestrError _ ->
-      if f_equal f_r0 f2 then f1 else f_real_sub f1 f2
+  f_real_add_simpl f1 (f_real_opp_simpl f2)
 
 let rec f_real_mul_simpl f1 f2 =
-  match f1.f_node, f2.f_node with
-  | Fapp (op1, [f1_1; f1_2]), Fapp (op2, [f2_1; f2_2])
-      when f_equal op1 fop_real_div
-        && f_equal op2 fop_real_div
-    -> f_real_div_simpl
-         (f_real_mul_simpl f1_1 f2_1)
-         (f_real_mul_simpl f1_2 f2_2)
+  let (n1, d1) = real_split f1 in
+  let (n2, d2) = real_split f2 in
 
-  | _, Fapp (op2, [f2_1; f2_2]) when f_equal op2 fop_real_div ->
-      f_real_div_simpl (f_real_mul_simpl f1 f2_1) f2_2
-
-  | Fapp (op1, [f1_1; f1_2]), _ when f_equal op1 fop_real_div ->
-      f_real_div_simpl (f_real_mul_simpl f1_1 f2) f1_2
-
-  | _ ->
-      try  f_rint (destr_rint f1 *^ destr_rint f2)
-      with DestrError _ ->
-             if f_equal f_r0 f1 || f_equal f_r0 f2 then f_r0
-        else if f_equal f_r1 f1 then f2
-        else if f_equal f_r1 f2 then f1
-        else f_real_mul f1 f2
+  f_real_div_simpl_r
+    (f_real_mul_simpl_r n1 n2)
+    (f_real_mul_simpl_r d1 d2)
 
 and f_real_div_simpl f1 f2 =
-  match f1.f_node, f2.f_node with
-  | Fapp (op1, [f1_1; f1_2]), Fapp (op2, [f2_1; f2_2])
-      when f_equal op1 fop_real_div
-        && f_equal op2 fop_real_div
-    -> f_real_div_simpl
-         (f_real_mul_simpl f1_1 f2_2)
-         (f_real_mul_simpl f1_2 f2_1)
+  let (n1, d1) = real_split f1 in
+  let (n2, d2) = real_split f2 in
 
-  | _, Fapp (op2, [f2_1; f2_2]) when f_equal op2 fop_real_div ->
-      f_real_div_simpl (f_real_mul_simpl f1 f2_2) f2_1
+  f_real_div_simpl_r
+    (f_real_mul_simpl_r n1 d2)
+    (f_real_mul_simpl_r d1 n2)
 
-  | Fapp (op, [f1_1; f1_2]), _ when f_equal op fop_real_div ->
-      f_real_div_simpl f1_1 (f_real_mul_simpl f1_2 f2)
+and f_real_mul_simpl_r f1 f2 =
+  if real_is_zero f1 || real_is_zero f2 then f_r0 else
+
+  if real_is_one f1 then f2 else
+  if real_is_one f2 then f1 else
+
+  try
+    f_rint (destr_rint f1 *^ destr_rint f2)
+  with DestrError _ ->
+    f_real_mul f1 f2
+
+and f_real_div_simpl_r f1 f2 =
+  let (f1, f2) =
+    try
+      let n1 = destr_rint f1 in
+      let n2 = destr_rint f2 in
+      let gd = BI.gcd n1 n2 in
+
+      f_rint (BI.div n1 gd), f_rint (BI.div n2 gd)
+
+    with
+    | DestrError _ -> (f1, f2)
+    | Division_by_zero -> (f_r0, f_r1)
+
+  in f_real_mul_simpl_r f1 (f_real_inv_simpl f2)
+
+and f_real_inv_simpl f =
+  match f.f_node with
+  | Fapp (op, [f]) when f_equal op fop_real_inv -> f
 
   | _ ->
-      try  norm_real_int_div (destr_rint f1) (destr_rint f2)
-      with DestrError _ ->
-        if f_equal f2 f_r1 then f1 else f_real_div f1 f2
+     try
+       match destr_rint f with
+       | n when BI.equal n BI.zero -> f_r0
+       | n when BI.equal n BI.one  -> f_r1
+       | _ -> destr_error "destr_rint/inv"
+     with DestrError _ -> f_app fop_real_inv [f] treal
 
 (* -------------------------------------------------------------------- *)
 let rec f_let_simpl lp f1 f2 =
@@ -402,8 +475,8 @@ let rec f_iff_simpl f1 f2 =
     match f1.f_node, f2.f_node with
     | Fapp ({f_node = Fop (op1, [])}, [f1]),
       Fapp ({f_node = Fop (op2, [])}, [f2]) when
-        (EcPath.p_equal op1 EcCoreLib.CI_Bool.p_not &&
-         EcPath.p_equal op2 EcCoreLib.CI_Bool.p_not)
+        (EcPath.p_equal op1 CI.CI_Bool.p_not &&
+         EcPath.p_equal op2 CI.CI_Bool.p_not)
         -> f_iff_simpl f1 f2
     | _ -> f_iff f1 f2
 
@@ -418,10 +491,10 @@ let rec f_eq_simpl f1 f2 =
     -> f_false
 
   | Fop (op1, []), Fop (op2, []) when
-         (EcPath.p_equal op1 EcCoreLib.CI_Bool.p_true  &&
-          EcPath.p_equal op2 EcCoreLib.CI_Bool.p_false  )
-      || (EcPath.p_equal op2 EcCoreLib.CI_Bool.p_true  &&
-          EcPath.p_equal op1 EcCoreLib.CI_Bool.p_false  )
+         (EcPath.p_equal op1 CI.CI_Bool.p_true  &&
+          EcPath.p_equal op2 CI.CI_Bool.p_false  )
+      || (EcPath.p_equal op2 CI.CI_Bool.p_true  &&
+          EcPath.p_equal op1 CI.CI_Bool.p_false  )
     -> f_false
 
   | Ftuple fs1, Ftuple fs2 when List.length fs1 = List.length fs2 ->
@@ -476,41 +549,39 @@ type op_kind = [
   | `Real_le
   | `Real_lt
   | `Int_add
-  | `Int_sub
   | `Int_mul
   | `Int_pow
   | `Int_opp
   | `Real_add
-  | `Real_sub
+  | `Real_opp
   | `Real_mul
-  | `Real_div
+  | `Real_inv
 ]
 
 let operators =
   let operators =
-    [EcCoreLib.CI_Bool.p_true    , `True     ;
-     EcCoreLib.CI_Bool.p_false   , `False    ;
-     EcCoreLib.CI_Bool.p_not     , `Not      ;
-     EcCoreLib.CI_Bool.p_anda    , `And `Asym;
-     EcCoreLib.CI_Bool.p_and     , `And `Sym ;
-     EcCoreLib.CI_Bool.p_ora     , `Or  `Asym;
-     EcCoreLib.CI_Bool.p_or      , `Or  `Sym ;
-     EcCoreLib.CI_Bool.p_imp     , `Imp      ;
-     EcCoreLib.CI_Bool.p_iff     , `Iff      ;
-     EcCoreLib.CI_Bool.p_eq      , `Eq       ;
-     EcCoreLib.CI_Int .p_int_le  , `Int_le   ;
-     EcCoreLib.CI_Int .p_int_lt  , `Int_lt   ;
-     EcCoreLib.CI_Int .p_int_add , `Int_add  ;
-     EcCoreLib.CI_Int .p_int_sub , `Int_sub  ;
-     EcCoreLib.CI_Int .p_int_mul , `Int_mul  ;
-     EcCoreLib.CI_Int .p_int_opp , `Int_opp  ;
-     EcCoreLib.CI_Int .p_int_pow , `Int_pow  ;
-     EcCoreLib.CI_Real.p_real_add, `Real_add ;
-     EcCoreLib.CI_Real.p_real_sub, `Real_sub ;
-     EcCoreLib.CI_Real.p_real_mul, `Real_mul ;
-     EcCoreLib.CI_Real.p_real_div, `Real_div ;
-     EcCoreLib.CI_Real.p_real_le , `Real_le  ;
-     EcCoreLib.CI_Real.p_real_lt , `Real_lt  ; ]
+    [CI.CI_Bool.p_true    , `True     ;
+     CI.CI_Bool.p_false   , `False    ;
+     CI.CI_Bool.p_not     , `Not      ;
+     CI.CI_Bool.p_anda    , `And `Asym;
+     CI.CI_Bool.p_and     , `And `Sym ;
+     CI.CI_Bool.p_ora     , `Or  `Asym;
+     CI.CI_Bool.p_or      , `Or  `Sym ;
+     CI.CI_Bool.p_imp     , `Imp      ;
+     CI.CI_Bool.p_iff     , `Iff      ;
+     CI.CI_Bool.p_eq      , `Eq       ;
+     CI.CI_Int .p_int_le  , `Int_le   ;
+     CI.CI_Int .p_int_lt  , `Int_lt   ;
+     CI.CI_Int .p_int_add , `Int_add  ;
+     CI.CI_Int .p_int_opp , `Int_opp  ;
+     CI.CI_Int .p_int_mul , `Int_mul  ;
+     CI.CI_Int .p_int_pow , `Int_pow  ;
+     CI.CI_Real.p_real_add, `Real_add ;
+     CI.CI_Real.p_real_opp, `Real_opp ;
+     CI.CI_Real.p_real_mul, `Real_mul ;
+     CI.CI_Real.p_real_inv, `Real_inv ;
+     CI.CI_Real.p_real_le , `Real_le  ;
+     CI.CI_Real.p_real_lt , `Real_lt  ; ]
   in
 
   let tbl = EcPath.Hp.create 11 in
@@ -527,8 +598,8 @@ let is_logical_op op =
   | Some (
         `Not | `And _ | `Or _ | `Imp | `Iff | `Eq
       | `Int_le   | `Int_lt   | `Real_le  | `Real_lt
-      | `Int_add  | `Int_sub  | `Int_mul
-      | `Real_add | `Real_sub | `Real_mul | `Real_div
+      | `Int_add  | `Int_opp  | `Int_mul
+      | `Real_add | `Real_opp | `Real_mul | `Real_inv
    ) -> true
 
   | _ -> false
@@ -541,6 +612,7 @@ type sform =
   | SFglob  of EcPath.mpath * memory
 
   | SFif    of form * form * form
+  | SFmatch of form * form list * ty
   | SFlet   of lpattern * form * form
   | SFtuple of form list
   | SFproj  of form * int
@@ -586,6 +658,7 @@ let rec sform_of_form fp =
   | Fglob (m, me) -> SFglob  (m, me)
 
   | Fif    (c, f1, f2)  -> SFif    (c, f1, f2)
+  | Fmatch (b, fs, ty)  -> SFmatch (b, fs, ty)
   | Flet   (lv, f1, f2) -> SFlet   (lv, f1, f2)
   | Ftuple fs           -> SFtuple fs
   | Fproj (f, i)        -> SFproj  (f,i)
@@ -663,3 +736,53 @@ let destr_exists_prenex f =
     | [] , _ -> destr_error "exists"
     | bds, f -> (bds, f)
 
+(* -------------------------------------------------------------------- *)
+module type DestrRing = sig
+  val le  : form -> form * form
+  val lt  : form -> form * form
+  val add : form -> form * form
+  val opp : form -> form
+  val sub : form -> form * form
+  val mul : form -> form * form
+end
+
+(* -------------------------------------------------------------------- *)
+module DestrInt : DestrRing = struct
+  let le  = destr_app2_eq ~name:"int_le"  CI.CI_Int.p_int_le
+  let lt  = destr_app2_eq ~name:"int_lt"  CI.CI_Int.p_int_lt
+  let add = destr_app2_eq ~name:"int_add" CI.CI_Int.p_int_add
+  let opp = destr_app1_eq ~name:"int_opp" CI.CI_Int.p_int_opp
+  let mul = destr_app2_eq ~name:"int_mul" CI.CI_Int.p_int_mul
+
+  let sub f =
+    try  snd_map opp (add f)
+    with DestrError _ -> raise (DestrError "int_sub")
+
+end
+
+(* -------------------------------------------------------------------- *)
+module type DestrReal = sig
+  include DestrRing
+
+  val inv : form -> form
+  val div : form -> form * form
+  val abs : form -> form
+end
+
+module DestrReal : DestrReal = struct
+  let le  = destr_app2_eq ~name:"real_le"  CI.CI_Real.p_real_le
+  let lt  = destr_app2_eq ~name:"real_lt"  CI.CI_Real.p_real_lt
+  let add = destr_app2_eq ~name:"real_add" CI.CI_Real.p_real_add
+  let opp = destr_app1_eq ~name:"real_opp" CI.CI_Real.p_real_opp
+  let mul = destr_app2_eq ~name:"real_mul" CI.CI_Real.p_real_mul
+  let inv = destr_app1_eq ~name:"real_inv" CI.CI_Real.p_real_inv
+  let abs = destr_app1_eq ~name:"real_abs" CI.CI_Real.p_real_abs
+
+  let sub f =
+    try  snd_map opp (add f)
+    with DestrError _ -> raise (DestrError "real_sub")
+
+  let div f =
+    try  snd_map inv (mul f)
+    with DestrError _ -> raise (DestrError "int_sub")
+end

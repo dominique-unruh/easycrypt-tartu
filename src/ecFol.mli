@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -34,7 +36,6 @@ val f_eqglob:
 (* soft-constructors - ordering *)
 val f_int_le  : form -> form -> form
 val f_int_lt  : form -> form -> form
-val f_int_sub : form -> form -> form
 
 (* soft-constructors - reals *)
 val f_rint : zint -> form
@@ -44,16 +45,16 @@ val f_r0 : form
 val f_r1 : form
 
 (* soft-constructor - numbers *)
-val f_int_intval : form -> form -> form
-val f_int_sum    : form -> form -> EcTypes.ty -> form
-
 val f_real_le : form -> form -> form
 val f_real_lt : form -> form -> form
 
-val f_real_div : form -> form -> form
 val f_real_add : form -> form -> form
+val f_real_opp : form -> form
 val f_real_sub : form -> form -> form
 val f_real_mul : form -> form -> form
+val f_real_inv : form -> form
+val f_real_div : form -> form -> form
+val f_real_abs : form -> form
 
 (* soft constructors - distributions *)
 val fop_in_supp : EcTypes.ty -> form
@@ -101,13 +102,16 @@ val f_real_le_simpl : form -> form -> form
 val f_real_lt_simpl : form -> form -> form
 
 val f_int_add_simpl : form -> form -> form
+val f_int_opp_simpl : form -> form
 val f_int_sub_simpl : form -> form -> form
 val f_int_mul_simpl : form -> form -> form
 
 val f_real_add_simpl : form -> form -> form
+val f_real_opp_simpl : form -> form
 val f_real_sub_simpl : form -> form -> form
 val f_real_mul_simpl : form -> form -> form
 val f_real_div_simpl : form -> form -> form
+val f_real_inv_simpl : form -> form
 
 (* -------------------------------------------------------------------- *)
 val destr_exists_prenex : form -> bindings * form
@@ -131,14 +135,13 @@ type op_kind = [
   | `Real_le
   | `Real_lt
   | `Int_add
-  | `Int_sub
   | `Int_mul
   | `Int_pow
   | `Int_opp
   | `Real_add
-  | `Real_sub
+  | `Real_opp
   | `Real_mul
-  | `Real_div
+  | `Real_inv
 ]
 
 val op_kind       : path -> op_kind option
@@ -155,6 +158,7 @@ type sform =
   | SFglob  of mpath * memory
 
   | SFif    of form * form * form
+  | SFmatch of form * form list * ty
   | SFlet   of lpattern * form * form
   | SFtuple of form list
   | SFproj  of form * int
@@ -181,3 +185,23 @@ type sform =
   | SFother of form
 
 val sform_of_form : form -> sform
+
+(* -------------------------------------------------------------------- *)
+module type DestrRing = sig
+  val le  : form -> form * form
+  val lt  : form -> form * form
+  val add : form -> form * form
+  val opp : form -> form
+  val sub : form -> form * form
+  val mul : form -> form * form
+end
+
+module DestrInt : DestrRing
+
+module DestrReal : sig
+  include DestrRing
+
+  val inv : form -> form
+  val div : form -> form * form
+  val abs : form -> form
+end

@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -79,6 +81,12 @@ let string_of_loglevel = function
   | `Info     -> "info"
   | `Warning  -> "warning"
   | `Critical -> "critical"
+
+(* -------------------------------------------------------------------- *)
+let max_loglevel x1 x2 =
+  let i1 = int_of_loglevel x1 in
+  let i2 = int_of_loglevel x2 in
+  if i1 < i2 then x2 else x1
 
 (* -------------------------------------------------------------------- *)
 let notify (lvl : loglevel) (msg : string Lazy.t) (gs : gstate) =

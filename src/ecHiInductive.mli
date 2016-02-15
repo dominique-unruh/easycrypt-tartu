@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -15,6 +17,7 @@ type rcerror =
 | RCE_TypeError        of EcTyping.tyerror
 | RCE_DuplicatedField  of symbol
 | RCE_InvalidFieldType of symbol * EcTyping.tyerror
+| RCE_Empty
 
 type dterror =
 | DTE_TypeError       of EcTyping.tyerror
@@ -45,10 +48,6 @@ exception FxError of EcLocation.t * EcEnv.env * fxerror
 val rcerror : EcLocation.t -> EcEnv.env -> rcerror -> 'a
 val dterror : EcLocation.t -> EcEnv.env -> dterror -> 'a
 val fxerror : EcLocation.t -> EcEnv.env -> fxerror -> 'a
-
-(* -------------------------------------------------------------------- *)
-val pp_rcerror : EcEnv.env -> Format.formatter -> rcerror -> unit
-val pp_dterror : EcEnv.env -> Format.formatter -> dterror -> unit
 
 (* -------------------------------------------------------------------- *)
 val trans_record : env -> ptydname -> precord -> record

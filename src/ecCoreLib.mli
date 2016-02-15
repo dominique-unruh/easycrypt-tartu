@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -67,13 +69,10 @@ module CI_Int : sig
 
   val p_int_opp : path
   val p_int_add : path
-  val p_int_sub : path
   val p_int_mul : path
   val p_int_pow : path
   val p_int_le  : path
   val p_int_lt  : path
-  val p_int_ge  : path
-  val p_int_gt  : path
 end
 
 (* -------------------------------------------------------------------- *)
@@ -82,19 +81,19 @@ module CI_Real : sig
   val p_Real : path
   val p_real : path
 
+  val p_RealOrder : path
+
+  val p_real0       : path 
+  val p_real1       : path
   val p_real_opp    : path
   val p_real_add    : path
-  val p_real_sub    : path
   val p_real_mul    : path
   val p_real_inv    : path
-  val p_real_div    : path
   val p_real_pow    : path
   val p_real_le     : path
   val p_real_lt     : path
-  val p_real_ge     : path
-  val p_real_gt     : path
-  val p_rle_ge_sym  : path
   val p_real_of_int : path
+  val p_real_abs    : path
 end
 
 (* -------------------------------------------------------------------- *)
@@ -111,20 +110,6 @@ module CI_Distr : sig
   val p_mu      : path
   val p_mu_x    : path
   val p_weight  : path
-end
-
-(* -------------------------------------------------------------------- *)
-module CI_FSet : sig
-  val p_FSet : path
-  val p_fset : path
-end
-
-(* -------------------------------------------------------------------- *)
-module CI_Sum : sig
-  val p_Sum : path
-
-  val p_int_intval : path
-  val p_int_sum    : path
 end
 
 (* -------------------------------------------------------------------- *)
@@ -156,6 +141,7 @@ module CI_Logic : sig
   val p_iff_intro     : path
   val p_if_intro      : path
   val p_eq_refl       : path
+  val p_eq_iff        : path
   val p_eq_trans      : path
   val p_fcongr        : path
   val p_eq_sym        : path
@@ -174,4 +160,6 @@ module CI_Logic : sig
   val p_iff_rl        : path
 
   val p_case_eq_bool  : path
+
+  val p_ip_dup        : path
 end

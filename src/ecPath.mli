@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -38,7 +40,7 @@ val prefix      : path -> path option
 val getprefix   : path -> path -> symbol list option
 val isprefix    : path -> path -> bool
 val rootname    : path -> symbol
-val tolist      : path -> symbol list 
+val tolist      : path -> symbol list
 val p_size      : path -> int
 
 (* -------------------------------------------------------------------- *)
@@ -61,6 +63,7 @@ and mpath_top =
 val mpath     : mpath_top -> mpath list -> mpath
 val mpath_abs : ident -> mpath list -> mpath
 val mqname    : mpath -> symbol -> mpath
+val mastrip   : mpath -> mpath
 
 val mident    : ident -> mpath
 val mpath_crt : path -> mpath list -> path option -> mpath
@@ -88,6 +91,7 @@ type xpath = private {
 val xpath     : mpath -> path -> xpath
 val xpath_fun : mpath -> symbol -> xpath
 val xqname    : xpath -> symbol -> xpath
+val xastrip   : xpath -> xpath
 
 val x_equal   : xpath -> xpath -> bool
 val x_compare : xpath -> xpath -> int

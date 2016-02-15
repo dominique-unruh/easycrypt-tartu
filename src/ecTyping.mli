@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -22,16 +24,20 @@ type opmatch = [
   | `Proj of EcTypes.prog_var * EcTypes.ty * (int * int)
 ]
 
+type mismatch_funsig =
+| MF_targs of ty * ty (* expected, got *)
+| MF_tres  of ty * ty (* expected, got *)
+| MF_restr of EcEnv.env * [`Eq of Sx.t * Sx.t | `Sub of Sx.t ]
+
 type tymod_cnv_failure =
 | E_TyModCnv_ParamCountMismatch
 | E_TyModCnv_ParamTypeMismatch of EcIdent.t
 | E_TyModCnv_MissingComp       of symbol
-| E_TyModCnv_MismatchFunSig    of symbol
+| E_TyModCnv_MismatchFunSig    of symbol * mismatch_funsig
 
 type modapp_error =
-| MAE_WrongArgPosition
-| MAE_WrongArgCount
-| MAE_InvalidArgType
+| MAE_WrongArgCount      of int * int  (* expected, got *)
+| MAE_InvalidArgType     of EcPath.mpath * tymod_cnv_failure
 | MAE_AccesSubModFunctor
 
 type modtyp_error =
@@ -48,7 +54,7 @@ type tyerror =
 | UniVarNotAllowed
 | FreeTypeVariables
 | TypeVarNotAllowed
-| OnlyMonoTypeAllowed
+| OnlyMonoTypeAllowed    of symbol option
 | UnboundTypeParameter   of symbol
 | UnknownTypeName        of qsymbol
 | UnknownTypeClass       of qsymbol
@@ -66,18 +72,18 @@ type tyerror =
 | NonLinearPattern
 | LvNonLinear
 | NonUnitFunWithoutReturn
-| UnitFunWithReturn
 | TypeMismatch           of (ty * ty) * (ty * ty)
 | TypeClassMismatch
 | TypeModMismatch        of tymod_cnv_failure
 | NotAFunction
+| AbbrevLowArgs
 | UnknownVarOrOp         of qsymbol * ty list
 | MultipleOpMatch        of qsymbol * ty list * (opmatch * EcUnify.unienv) list
 | UnknownModName         of qsymbol
 | UnknownTyModName       of qsymbol
 | UnknownFunName         of qsymbol
 | UnknownModVar          of qsymbol
-| UnknownMemName         of int * symbol
+| UnknownMemName         of symbol
 | InvalidFunAppl         of funapp_error
 | InvalidModAppl         of modapp_error
 | InvalidModType         of modtyp_error
@@ -94,10 +100,6 @@ exception TyError of EcLocation.t * env * tyerror
 val tyerror : EcLocation.t -> env -> tyerror -> 'a
 
 (* -------------------------------------------------------------------- *)
-val pp_tyerror     : env -> Format.formatter -> tyerror -> unit
-val pp_cnv_failure :  Format.formatter -> env -> tymod_cnv_failure -> unit
-
-(* -------------------------------------------------------------------- *)
 val unify_or_fail : env -> EcUnify.unienv -> EcLocation.t -> expct:ty -> ty -> unit
 
 (* -------------------------------------------------------------------- *)
@@ -111,15 +113,19 @@ val transtyvars:
   env -> (EcLocation.t * ptyparams option) -> EcUnify.unienv
 
 (* -------------------------------------------------------------------- *)
-val transty : typolicy -> env -> EcUnify.unienv -> pty -> ty 
+val transty : typolicy -> env -> EcUnify.unienv -> pty -> ty
 
-val transtys :  
+val transtys :
     typolicy -> env -> EcUnify.unienv -> pty list -> ty list
 
 val transtvi : env -> EcUnify.unienv -> ptyannot -> EcUnify.tvar_inst
 
-val transbinding : env -> EcUnify.unienv -> ptybindings ->
+(* -------------------------------------------------------------------- *)
+val trans_binding : env -> EcUnify.unienv -> ptybindings ->
   env * (EcIdent.t * EcTypes.ty) list
+
+val trans_gbinding : env -> EcUnify.unienv -> pgtybindings ->
+  env * (EcIdent.t * EcFol.gty) list
 
 (* -------------------------------------------------------------------- *)
 val transexp         : env -> [`InProc|`InOp] -> EcUnify.unienv -> pexpr -> expr * ty
@@ -145,18 +151,26 @@ val transmod     : attop:bool -> env -> symbol -> pmodule_expr -> module_expr
 
 val trans_topmsymbol : env -> pmsymbol located -> mpath
 val trans_msymbol    : env -> pmsymbol located -> mpath * module_sig
-val trans_gamepath   : env -> pgamepath -> xpath 
+val trans_gamepath   : env -> pgamepath -> xpath
 
 (* -------------------------------------------------------------------- *)
-type restriction_error
-  
-exception RestrictionError of restriction_error
+type restriction_who =
+| RW_mod of EcPath.mpath
+| RW_fun of EcPath.xpath
 
-val pp_restriction_error : 
-   EcEnv.env -> Format.formatter -> restriction_error -> unit
+type restriction_err =
+| RE_UseVariable          of EcPath.xpath
+| RE_UseVariableViaModule of EcPath.xpath * EcPath.mpath
+| RE_UseModule            of EcPath.mpath
+| RE_VMissingRestriction  of EcPath.xpath * EcPath.mpath pair
+| RE_MMissingRestriction  of EcPath.mpath * EcPath.mpath pair
+
+type restriction_error = restriction_who * restriction_err
+
+exception RestrictionError of EcEnv.env * restriction_error
 
 val check_sig_mt_cnv :
-  env -> module_sig -> module_type -> unit 
+  env -> module_sig -> module_type -> unit
 
 val check_restrictions_fun :
   env -> xpath -> use -> mod_restr -> unit

@@ -1,10 +1,15 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
 open EcLocation
+
+(* -------------------------------------------------------------------- *)
+exception Restart
 
 (* -------------------------------------------------------------------- *)
 val addidir  : ?system:bool -> ?recursive:bool -> string -> unit
@@ -21,11 +26,16 @@ type checkmode = {
   cm_provers  : string list option;
   cm_wrapper  : string option;
   cm_profile  : bool;
-  cm_oldsmt   : bool;
   cm_iterate  : bool;
 }
 
-val initialize  : undo:bool -> boot:bool -> checkmode:checkmode -> unit
+val initialize  :
+     restart:bool
+  -> undo:bool
+  -> boot:bool
+  -> checkmode:checkmode
+  -> unit
+
 val current     : unit -> EcScope.scope
 val addnotifier : notifier -> unit
 

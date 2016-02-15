@@ -1,4 +1,12 @@
+;; --------------------------------------------------------------------
+;; Copyright (c) - 2012--2016 - IMDEA Software Institute
+;; Copyright (c) - 2012--2016 - Inria
+;;
+;; Distributed under the terms of the GPL-v3 license
+;; --------------------------------------------------------------------
+
 (require 'proof)
+(require 'pg-custom)
 (require 'easycrypt-syntax)
 (require 'easycrypt-hooks)
 (require 'easycrypt-abbrev)
@@ -6,9 +14,24 @@
 (add-to-list 'hs-special-modes-alist
   '(easycrypt-mode "{" "}" "/[*/]" nil nil))
 
-(defcustom easycrypt-prog-name "easycrypt -emacs"
+;; --------------------------------------------------------------------
+(defun easycrypt-load-path-safep (path)
+  (and
+   (listp path)
+   (every (lambda (entry) (stringp entry)) path)))
+
+;; --------------------------------------------------------------------
+(defcustom easycrypt-prog-name "easycrypt"
   "*Name of program to run EasyCrypt."
   :type  'file
+  :group 'easycrypt)
+
+(defcustom easycrypt-load-path nil
+  "Non-standard EasyCrypt library load path.
+This list specifies the include path for EasyCrypt. The elements of
+this list are strings."
+  :type  '(repeat (string :tag "simple directory (-I)"))
+  :safe  'easycrypt-load-path-safep
   :group 'easycrypt)
 
 (defcustom easycrypt-web-page
@@ -16,6 +39,30 @@
   "URL of web page for EasyCrypt."
   :type  'string
   :group 'easycrypt-config)
+
+;; --------------------------------------------------------------------
+(defun easycrypt-option-of-load-path-entry (entry)
+  (list "-I" (expand-file-name entry)))
+
+;; --------------------------------------------------------------------
+(defun easycrypt-include-options ()
+  (let ((result nil))
+    (when easycrypt-load-path
+      (dolist (entry easycrypt-load-path)
+        (setq result (append result (easycrypt-option-of-load-path-entry entry)))))
+    result))
+
+;; --------------------------------------------------------------------
+(defun easycrypt-build-prog-args ()
+  (delete "-emacs" easycrypt-prog-args)
+  (push "-emacs" easycrypt-prog-args))
+
+(easycrypt-build-prog-args)
+
+;; --------------------------------------------------------------------
+(defun easycrypt-prog-args ()
+  (message "%s" easycrypt-load-path)
+  (append easycrypt-prog-args (easycrypt-include-options)))
 
 ;; --------------------------------------------------------------------
 ;; Generic mode
@@ -34,7 +81,7 @@
   (setq  proof-find-and-forget-fn              'easycrypt-find-and-forget
          proof-completed-proof-behaviour       nil
          proof-non-undoables-regexp            easycrypt-non-undoables-regexp
-         proof-shell-restart-cmd               "pragma reset. ")
+         proof-shell-restart-cmd               "pragma restart. ")
 
   (set (make-local-variable 'comment-quote-nested) nil)
 
@@ -85,7 +132,8 @@
   "Configure Proof General shell for EasyCrypt."
   (easycrypt-init-output-syntax-table)
   (setq  proof-shell-auto-terminate-commands    easycrypt-terminal-string)
-  (setq  proof-shell-eager-annotation-start     "^\\[W\\] *")
+  (setq  proof-shell-eager-annotation-start
+     (concat "\\(?:^\\[W\\] *\\)\\|\\(?:" easycrypt-shell-proof-completed-regexp "\\)"))
   (setq  proof-shell-strip-crs-from-input       nil)
   (setq  proof-shell-annotated-prompt-regexp    "^\\[[0-9]+|\\sw+\\]>")
   (setq  proof-shell-clear-goals-regexp         easycrypt-shell-proof-completed-regexp)
@@ -178,6 +226,34 @@
   "Set EasyCrypt in weak-check mode."
   (interactive)
   (proof-shell-invisible-command "pragma Proofs:weak."))
+
+;; --------------------------------------------------------------------
+(defun easycrypt-ask-do (do)
+  (let* ((cmd))
+    (setq cmd (read-string (format "Term for `%s': " do)))
+    (proof-shell-ready-prover)
+    (proof-shell-invisible-command (format " %s %s . " do cmd))))
+
+;; --------------------------------------------------------------------
+(defun easycrypt-Print ()
+  "Ask for a term and print its type."
+  (interactive)
+  (easycrypt-ask-do "print"))
+
+;; --------------------------------------------------------------------
+(defun easycrypt-Check ()
+  (easycrypt-Print))
+
+;; --------------------------------------------------------------------
+;; Key bindings
+
+(define-key easycrypt-keymap "\C-p" 'easycrypt-Print)
+(define-key easycrypt-goals-mode-map "\C-c\C-a\C-p" 'easycrypt-Print)
+(define-key easycrypt-response-mode-map "\C-c\C-a\C-p" 'easycrypt-Print)
+
+(define-key easycrypt-keymap "\C-c" 'easycrypt-Check)
+(define-key easycrypt-goals-mode-map "\C-c\C-a\C-c" 'easycrypt-Check)
+(define-key easycrypt-response-mode-map "\C-c\C-a\C-c" 'easycrypt-Check)
 
 ;; --------------------------------------------------------------------
 ;; 3-window pane layout hack

@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -17,8 +19,8 @@ module Sx  = EcPath.Sx
 module TTC = EcProofTyping
 
 (* -------------------------------------------------------------------- *)
-let while_info env e s = 
-  let rec i_info (w,r,c) i = 
+let while_info env e s =
+  let rec i_info (w,r,c) i =
     match i.i_node with
     | Sasgn(lp, e) | Srnd(lp, e) ->
         let r = e_read_r env (EcPV.lp_read_r env r lp) e in
@@ -37,25 +39,25 @@ let while_info env e s =
         let w = match lp with None -> w | Some lp -> lp_write_r env w lp in
         let f = EcEnv.NormMp.norm_xfun env f in
         (w, r, Sx.add f c)
-  
+
     | Sassert e ->
         (w, e_read_r env r e, c)
 
     | Sabstract id ->
-      let add_pv x (pv,ty) = PV.add env pv ty x in 
+      let add_pv x (pv,ty) = PV.add env pv ty x in
       let us = EcEnv.AbsStmt.byid id env in
-      let w = List.fold_left add_pv w us.EcBaseLogic.aus_writes in
-      let r = List.fold_left add_pv r us.EcBaseLogic.aus_reads in
-      let c = List.fold_left (fun c f -> Sx.add f c) c us.EcBaseLogic.aus_calls in
+      let w = List.fold_left add_pv w us.EcModules.aus_writes in
+      let r = List.fold_left add_pv r us.EcModules.aus_reads in
+      let c = List.fold_left (fun c f -> Sx.add f c) c us.EcModules.aus_calls in
       (w, r, c)
 
   and s_info info s = List.fold_left i_info info s.s_node in
 
   let (w,r,c) = s_info (PV.empty, EcPV.e_read env e, Sx.empty) s in
 
-  { EcBaseLogic.aus_reads  = fst (PV.elements r);
-    EcBaseLogic.aus_writes = fst (PV.elements w);
-    EcBaseLogic.aus_calls  = Sx.elements c; }
+  { EcModules.aus_reads  = fst (PV.elements r);
+    EcModules.aus_writes = fst (PV.elements w);
+    EcModules.aus_calls  = Sx.elements c; }
 
 (* -------------------------------------------------------------------- *)
 let t_hoare_while_r inv tc =
@@ -336,7 +338,7 @@ let process_while side winfos tc =
   match (FApi.tc1_goal tc).f_node with
   | FhoareS _ -> begin
       match vrnt with
-      | None -> t_hoare_while (TTC.tc1_process_phl_formula tc phi) tc
+      | None -> t_hoare_while (TTC.tc1_process_Xhl_formula tc phi) tc
       | _    -> tc_error !!tc "invalid arguments"
     end
 
@@ -344,20 +346,20 @@ let process_while side winfos tc =
       match vrnt, bds with
       | Some vrnt, None ->
           t_bdhoare_while
-            (TTC.tc1_process_phl_formula tc phi)
-            (TTC.tc1_process_phl_form tc tint vrnt)
+            (TTC.tc1_process_Xhl_formula tc phi)
+            (TTC.tc1_process_Xhl_form tc tint vrnt)
             tc
 
       | Some vrnt, Some (k, eps) ->
         t_bdhoare_while_rev_geq
-          (TTC.tc1_process_phl_formula tc phi)
-          (TTC.tc1_process_phl_form    tc tint vrnt)
-          (TTC.tc1_process_phl_form    tc tint k)
-          (TTC.tc1_process_phl_form    tc treal eps)
+          (TTC.tc1_process_Xhl_formula tc phi)
+          (TTC.tc1_process_Xhl_form    tc tint vrnt)
+          (TTC.tc1_process_Xhl_form    tc tint k)
+          (TTC.tc1_process_Xhl_form    tc treal eps)
           tc
 
       | None, None ->
-          t_bdhoare_while_rev (TTC.tc1_process_phl_formula tc phi) tc
+          t_bdhoare_while_rev (TTC.tc1_process_Xhl_formula tc phi) tc
 
       | None, Some _ -> tc_error !!tc "invalid arguments"
   end

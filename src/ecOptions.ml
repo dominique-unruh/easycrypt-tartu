@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -22,6 +24,7 @@ and options = {
 and cmp_option = {
   cmpo_input   : string;
   cmpo_provers : prv_options;
+  cmpo_gcstats : bool;
 }
 
 and cli_option = {
@@ -37,7 +40,6 @@ and prv_options = {
   prvo_pragmas   : string list;
   prvo_checkall  : bool;
   prvo_profile   : bool;
-  prvo_oldsmt    : bool;
   prvo_iterate   : bool;
 }
 
@@ -197,8 +199,8 @@ let parse spec argv =
               ""
           with Arg.Bad msg ->
             try
-              ignore (Str.search_forward (Str.regexp "\\(.*\\)") msg 0);
-              raise (Arg.Bad (Str.matched_group 1 msg))
+              let msg = Pcre.get_substring (Pcre.exec ~pat:"(.*)" msg) 1 in
+              raise (Arg.Bad msg)
             with Not_found -> raise (Arg.Bad msg)
         end;
         (command, !values, List.rev !anons)
@@ -217,7 +219,8 @@ let specs = {
 
     ("compile", "Check an EasyCrypt file", [
       `Group "loader";
-      `Group "provers"]);
+      `Group "provers";
+      `Spec  ("gcstats", `Flag, "Display GC statistics")]);
 
     ("cli", "Run EasyCrypt top-level", [
       `Group "loader";
@@ -236,10 +239,9 @@ let specs = {
       `Spec ("check-all"  , `Flag  , "Force checking all files");
       `Spec ("pragmas"    , `String, "Comma-separated list of pragmas");
       `Spec ("profile"    , `Flag  , "Collect some profiling informations");
-      `Spec ("old-smt"    , `Flag  , "Force to use old version of smt");
       `Spec ("iterate"    , `Flag  , "Force to iterate smt call");
     ]);
-       
+
 
     ("loader", "Options related to loader", [
       `Spec ("I"   , `String, "Add <dir> to the list of include directories");
@@ -306,7 +308,6 @@ let prv_options_of_values values =
       prvo_pragmas   = get_string_list "pragmas" values;
       prvo_checkall  = get_flag "check-all" values;
       prvo_profile   = get_flag "profile" values;
-      prvo_oldsmt    = get_flag "old-smt" values;
       prvo_iterate   = get_flag "iterate" values;
     }
 
@@ -316,7 +317,8 @@ let cli_options_of_values values =
 
 let cmp_options_of_values values input =
   { cmpo_input   = input;
-    cmpo_provers = prv_options_of_values values; }
+    cmpo_provers = prv_options_of_values values;
+    cmpo_gcstats = get_flag "gcstats" values; }
 
 (* -------------------------------------------------------------------- *)
 let parse argv =
@@ -353,7 +355,7 @@ let parse argv =
     | _    -> List.exists (fun (x, _, _) -> x = args.(0)) specs.xp_commands
   in
 
-  let isec x = Str.string_match (Str.regexp ".*\\.eca?") x 0 in
+  let isec x = Pcre.pmatch ~pat:".*\\.eca?" x in
 
   let necfiles = Array.fold_left (fun s n -> if isec n then s+1 else s) 0 args in
   let ecommand =

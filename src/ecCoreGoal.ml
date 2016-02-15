@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -89,30 +91,8 @@ let palocal x =
 type rwproofterm = {
   rpt_proof : proofterm;
   rpt_occrs : EcMatching.ptnpos option;
+  rpt_lc    : ident option;
 }
-
-(* -------------------------------------------------------------------- *)
-type location = {
-  plc_parent : location option;
-  plc_name   : string option;
-  plc_loc    : EcLocation.t;
-}
-
-let mk_location ?parent ?name loc =
-  { plc_parent = parent; plc_name = name; plc_loc = loc; }
-
-exception TcError of bool * location option * string Lazy.t
-
-let pp_tc_error fmt (lazy msg) =
-  Format.fprintf fmt "%s\n%!" msg
-
-let () =
-  let pp fmt exn =
-    match exn with
-    | TcError (_, _, msg) -> pp_tc_error fmt msg
-    | _ -> raise exn
-  in
-    EcPException.register pp
 
 (* -------------------------------------------------------------------- *)
 type proof = {
@@ -142,6 +122,7 @@ and validation =
 | VAdmit                             (* admit *)
 | VIntros  of (handle * idents)      (* intros *)
 | VConv    of (handle * Sid.t)       (* weakening + conversion *)
+| VLConv   of (handle * ident)       (* hypothesis conversion *)
 | VRewrite of (handle * rwproofterm) (* rewrite *)
 | VApply   of proofterm              (* modus ponens *)
 
@@ -163,7 +144,38 @@ and tcenv_ctxt  = tcenv_ctxt1 list
 and tcenv_ctxt1 = handle list
 
 (* -------------------------------------------------------------------- *)
-let tc_error (_pe : proofenv) ?(catchable = true) ?loc ?who fmt =
+type location = {
+  plc_parent : location option;
+  plc_name   : string option;
+  plc_loc    : EcLocation.t;
+}
+
+type tcemsg =
+| TCEUser : 'a * ('a -> string) -> tcemsg
+| TCEExn  : exn -> tcemsg
+
+type tcerror =  {
+  tc_catchable : bool;
+  tc_proofenv  : proofenv option;
+  tc_location  : location option;
+  tc_message   : tcemsg;
+  tc_reloced   : (EcSymbols.symbol * bool) option;
+}
+
+let mk_location ?parent ?name loc =
+  { plc_parent = parent; plc_name = name; plc_loc = loc; }
+
+let mk_tcerror ?(catchable = true) ?penv ?loc msg =
+  { tc_catchable = catchable;
+    tc_proofenv  = penv;
+    tc_location  = loc;
+    tc_message   = (TCEUser (msg, Lazy.force));
+    tc_reloced   = None; }
+
+exception TcError of tcerror
+
+(* -------------------------------------------------------------------- *)
+let tc_error (penv : proofenv) ?(catchable = true) ?loc ?who fmt =
   let buf  = Buffer.create 127 in
   let fbuf = Format.formatter_of_buffer buf in
   let loc  = loc |> omap (fun loc -> mk_location loc) in
@@ -171,8 +183,20 @@ let tc_error (_pe : proofenv) ?(catchable = true) ?loc ?who fmt =
     Format.kfprintf
       (fun _ ->
          Format.pp_print_flush fbuf ();
-         raise (TcError (catchable, loc, lazy (Buffer.contents buf))))
+         let error = lazy (Buffer.contents buf) in
+         let error = mk_tcerror ~catchable ~penv ?loc error in
+         raise (TcError error))
       fbuf fmt
+
+(* -------------------------------------------------------------------- *)
+let tc_error_exn (penv : proofenv) ?(catchable = true) ?loc ?who exn =
+  ignore (who : string option);
+  raise (TcError (
+    { tc_catchable = catchable;
+      tc_proofenv  = Some penv;
+      tc_location  = loc |> omap (fun loc -> mk_location loc);
+      tc_message   = (TCEExn exn);
+      tc_reloced   = None; }))
 
 (* -------------------------------------------------------------------- *)
 let tacuerror ?(catchable = true) fmt =
@@ -181,11 +205,21 @@ let tacuerror ?(catchable = true) fmt =
     Format.kfprintf
       (fun _ ->
          Format.pp_print_flush fbuf ();
-         raise (TcError (catchable, None, lazy (Buffer.contents buf))))
+         let error = lazy (Buffer.contents buf) in
+         raise (TcError (mk_tcerror ~catchable error)))
       fbuf fmt
 
 (* -------------------------------------------------------------------- *)
-let tc_error_lazy (_pe : proofenv) ?(catchable = true) ?loc ?who msg =
+let tacuerror_exn ?(catchable = true) exn =
+  raise (TcError {
+    tc_catchable = catchable;
+    tc_proofenv  = None;
+    tc_location  = None;
+    tc_message   = (TCEExn exn);
+    tc_reloced   = None; })
+
+(* -------------------------------------------------------------------- *)
+let tc_error_lazy (penv : proofenv) ?(catchable = true) ?loc ?who msg =
   let getmsg () =
     let buf  = Buffer.create 127 in
     let fbuf = Format.formatter_of_buffer buf in
@@ -196,21 +230,7 @@ let tc_error_lazy (_pe : proofenv) ?(catchable = true) ?loc ?who msg =
   let loc = loc |> omap (fun loc -> mk_location loc) in
 
   ignore (who : string option);         (* FIXME: remove? *)
-  raise (TcError (catchable, loc, lazy (getmsg ())))
-
-(* -------------------------------------------------------------------- *)
-let tc_error_clear (pe : proofenv) ?catchable ?loc ?who err =
-    tc_error_lazy pe ?catchable ?loc ?who (fun fmt ->
-      let pp_id fmt id = Format.fprintf fmt "%s" (EcIdent.name id) in
-      match Lazy.force err with
-      | `ClearInGoal xs ->
-          Format.fprintf fmt
-            "cannot clear %a that is/are used in the conclusion"
-            (EcPrinting.pp_list ",@ " pp_id) xs
-      | `ClearDep (x, y) ->
-          Format.fprintf fmt
-            "cannot clear %a that is used in %a"
-            pp_id x pp_id y)
+  raise (TcError (mk_tcerror ~catchable ~penv ?loc (lazy (getmsg ()))))
 
 (* -------------------------------------------------------------------- *)
 type symkind = [`Lemma | `Operator | `Local]
@@ -230,13 +250,18 @@ let tc_lookup_error pe ?loc ?who kind qs =
         (EcSymbols.string_of_qsymbol qs))
 
 (* -------------------------------------------------------------------- *)
-let reloc _ f x = f x                   (* FIXME *)
+let reloc t f x =
+  try  (f x)
+  with TcError exn when is_none exn.tc_location ->
+    let t = { plc_parent = None; plc_name = None; plc_loc = t } in
+    raise (TcError { exn with tc_location = Some t })
 
 (* -------------------------------------------------------------------- *)
 module FApi = struct
-  type forward  = proofenv -> proofenv * handle
-  type backward = tcenv1 -> tcenv
-  type tactical = tcenv -> tcenv
+  type forward   = proofenv -> proofenv * handle
+  type backward  = tcenv1 -> tcenv
+  type ibackward = int -> backward
+  type tactical  = tcenv -> tcenv
 
   exception InvalidStateException of string
 
@@ -257,6 +282,10 @@ module FApi = struct
   (* ------------------------------------------------------------------ *)
   let get_pregoal_by_id (hd : handle) (pe : proofenv) =
     (get_goal_by_id hd pe).g_goal
+
+  (* ------------------------------------------------------------------ *)
+  let get_main_pregoal (pe : proofenv) =
+    get_pregoal_by_id pe.pr_main pe
 
   (* ------------------------------------------------------------------ *)
   let tc1_get_pregoal_by_id (hd : handle) (tc : tcenv1) =
@@ -331,28 +360,34 @@ module FApi = struct
     (tc1_current tc).g_uid
 
   (* ------------------------------------------------------------------ *)
-  let tc1_flat (tc : tcenv1) =
-    let { g_hyps; g_concl } = tc1_current tc in (g_hyps, g_concl)
+  let tc1_flat ?target (tc : tcenv1) =
+    let { g_hyps; g_concl } = tc1_current tc in
+    match target with
+    | None   -> (g_hyps, g_concl)
+    | Some h -> (LDecl.local_hyps h g_hyps, LDecl.hyp_by_id h g_hyps)
 
   (* ------------------------------------------------------------------ *)
-  let tc1_eflat (tc : tcenv1) =
-    let (hyps, concl) = tc1_flat tc in
-      (LDecl.toenv hyps, hyps, concl)
+  let tc1_eflat ?target (tc : tcenv1) =
+    let (hyps, concl) = tc1_flat ?target tc in
+    (LDecl.toenv hyps, hyps, concl)
+
+  (* ------------------------------------------------------------------ *)
+  let tc1_hyps ?target (tc : tcenv1) = fst (tc1_flat ?target tc)
 
   (* ------------------------------------------------------------------ *)
   let tc1_penv (tc : tcenv1) = tc.tce_penv
-  let tc1_hyps (tc : tcenv1) = fst (tc1_flat tc)
   let tc1_goal (tc : tcenv1) = snd (tc1_flat tc)
   let tc1_env  (tc : tcenv1) = LDecl.toenv (tc1_hyps tc)
 
   (* ------------------------------------------------------------------ *)
   let tc_handle (tc : tcenv) = tc1_handle tc.tce_tcenv
-  let tc_flat   (tc : tcenv) = tc1_flat   tc.tce_tcenv
-  let tc_eflat  (tc : tcenv) = tc1_eflat  tc.tce_tcenv
   let tc_penv   (tc : tcenv) = tc1_penv   tc.tce_tcenv
-  let tc_hyps   (tc : tcenv) = tc1_hyps   tc.tce_tcenv
   let tc_goal   (tc : tcenv) = tc1_goal   tc.tce_tcenv
   let tc_env    (tc : tcenv) = tc1_env    tc.tce_tcenv
+
+  let tc_flat   ?target (tc : tcenv) = tc1_flat  ?target tc.tce_tcenv
+  let tc_eflat  ?target (tc : tcenv) = tc1_eflat ?target tc.tce_tcenv
+  let tc_hyps   ?target (tc : tcenv) = tc1_hyps  ?target tc.tce_tcenv
 
   (* ------------------------------------------------------------------ *)
   let tc_opened (tc : tcenv) =
@@ -496,12 +531,31 @@ module FApi = struct
     tc_up (tt (tc_down tc))
 
   (* ------------------------------------------------------------------ *)
-  let on_sub1_goals (tt : backward) (hds : handle list) (pe : proofenv) =
-    let do1 pe hd =
-      let tc = tt (tcenv1_of_penv hd pe) in
+  let on_sub1i_goals (tt : int -> backward) (hds : handle list) (pe : proofenv) =
+    let do1 i pe hd =
+      let tc = tt i (tcenv1_of_penv hd pe) in
       assert (tc.tce_tcenv.tce_ctxt = []);
       (tc_penv tc, tc_opened tc) in
-    List.map_fold do1 pe hds
+    List.mapi_fold do1 pe hds
+
+  (* ------------------------------------------------------------------ *)
+  let on_sub1_goals (tt : backward) (hds : handle list) (pe : proofenv) =
+    on_sub1i_goals (fun (_ : int) -> tt) hds pe
+
+  (* ------------------------------------------------------------------ *)
+  let on_sub1i_map_goals
+    (tt : int -> tcenv1 -> 'a * tcenv) (hds : handle list) (pe : proofenv)
+  =
+    let do1 i pe hd =
+      let data, tc = tt i (tcenv1_of_penv hd pe) in
+      assert (tc.tce_tcenv.tce_ctxt = []);
+      (tc_penv tc, (tc_opened tc, data)) in
+    List.mapi_fold do1 pe hds
+
+  (* ------------------------------------------------------------------ *)
+  let on_sub1_map_goals
+    (tt : tcenv1 -> 'a * tcenv) (hds : handle list) (pe : proofenv)
+  = on_sub1i_map_goals (fun (_ : int) -> tt) hds pe
 
   (* ------------------------------------------------------------------ *)
   let on_sub_goals (tt : backward list) (hds : handle list) (pe : proofenv) =
@@ -512,11 +566,22 @@ module FApi = struct
     List.map_fold2 do1 pe tt hds
 
   (* ------------------------------------------------------------------ *)
-  let t_onall (tt : backward) (tc : tcenv) =
+  let t_onalli (tt : ibackward) (tc : tcenv) =
     let pe      = tc.tce_tcenv.tce_penv in
-    let pe, ln  = on_sub1_goals tt (tc_opened tc) pe in
+    let pe, ln  = on_sub1i_goals tt (tc_opened tc) pe in
     let ln      = List.flatten ln in
     tcenv_of_penv ~ctxt:tc.tce_tcenv.tce_ctxt ln pe
+
+  (* ------------------------------------------------------------------ *)
+  let t_onall (tt : backward) (tc : tcenv) =
+    t_onalli (fun (_ : int) -> tt) tc
+
+  (* ------------------------------------------------------------------ *)
+  let t_map (tt : tcenv1 -> 'a * tcenv) (tc : tcenv) =
+    let pe      = tc.tce_tcenv.tce_penv in
+    let pe, ln  = on_sub1_map_goals tt (tc_opened tc) pe in
+    let ln, dt  = fst_map List.flatten (List.split ln) in
+    (dt, tcenv_of_penv ~ctxt:tc.tce_tcenv.tce_ctxt ln pe)
 
   (* ------------------------------------------------------------------ *)
   let t_firsts (tt : backward) (i : int) (tc : tcenv) =
@@ -571,17 +636,46 @@ module FApi = struct
     tcenv_of_penv ~ctxt:tc.tce_tcenv.tce_ctxt (List.flatten ln) !pe
 
   (* ------------------------------------------------------------------ *)
+  let t_onfsub_map (tx : int -> tcenv1 -> 'a * tcenv) (tc : tcenv) =
+    let do1 pe i hd =
+      let data, tc = tx i (tcenv1_of_penv hd !pe) in
+      assert (tc.tce_tcenv.tce_ctxt = []);
+      pe := (tc_penv tc); (tc_opened tc, data)
+    in
+
+    let pe = ref (tc_penv tc) in
+    let ln, data = List.split (List.mapi (do1 pe) (tc_opened tc)) in
+
+    (data, tcenv_of_penv ~ctxt:tc.tce_tcenv.tce_ctxt (List.flatten ln) !pe)
+
+  (* ------------------------------------------------------------------ *)
   let t_sub (ts : backward list) (tc : tcenv) =
     let ts = Array.of_list ts in
     if Array.length ts <> tc_count tc then
       raise InvalidGoalShape;
     t_onfsub (fun i -> Some ts.(i)) tc
 
+  (* -------------------------------------------------------------------- *)
+  let t_submap (ts : (tcenv1 -> 'a * tcenv) list) (tc : tcenv) =
+    let ts = Array.of_list ts in
+    if Array.length ts <> tc_count tc then
+      raise InvalidGoalShape;
+    t_onfsub_map (fun i -> ts.(i)) tc
+
+  (* ------------------------------------------------------------------ *)
+  let t_onselecti (test : tfocus) ?ttout (tt : ibackward) (tc : tcenv) =
+    let ttout i = ttout |> omap (fun ttout -> ttout i) in
+
+    if   tc_count tc > 0
+    then t_onfsub (fun i -> if test i then Some (tt i) else ttout i) tc
+    else tc
+
   (* ------------------------------------------------------------------ *)
   let t_onselect (test : tfocus) ?ttout (tt : backward) (tc : tcenv) =
-    if   tc_count tc > 0
-    then t_onfsub (fun i -> if test i then Some tt else ttout) tc
-    else tc
+    t_onselecti test
+      ?ttout:(ttout |> omap (fun ttout (_ : int) -> ttout))
+      (fun (_ : int) -> tt)
+      tc
 
   (* ------------------------------------------------------------------ *)
   let t_on1 idx ?ttout tt (tc : tcenv) =
@@ -603,7 +697,7 @@ module FApi = struct
   let t_swap_goals (g:int) (delta:int) (tc:tcenv) =
     if delta = 0 || tc.tce_tcenv.tce_goal = None then tc
     else
-      let s = 
+      let s =
         let rgs1, g, gs2 =
           try  List.pivot_at g (tc_opened tc)
           with Invalid_argument _ -> raise InvalidGoalShape
@@ -643,11 +737,11 @@ module FApi = struct
   (* ------------------------------------------------------------------ *)
   let t_try_base tt tc =
     let rec is_user_error = function
-      | EcTyping.TyError  _   -> true
-      | TcError  (true, _, _) -> true
-      | InvalidGoalShape      -> true
-      | ClearError _          -> true
-      | LocError (_, e)       -> is_user_error e
+      | EcTyping.TyError  _ -> true
+      | InvalidGoalShape    -> true
+      | ClearError _        -> true
+      | LocError (_, e)     -> is_user_error e
+      | TcError tc          -> tc.tc_catchable
       | _ -> false
     in
 
@@ -802,11 +896,12 @@ module RApi = struct
 
   (* ------------------------------------------------------------------ *)
   let tc_penv  (tc : rtcenv) = FApi.tc_penv  !tc
-  let tc_flat  (tc : rtcenv) = FApi.tc_flat  !tc
-  let tc_eflat (tc : rtcenv) = FApi.tc_eflat !tc
   let tc_goal  (tc : rtcenv) = FApi.tc_goal  !tc
-  let tc_hyps  (tc : rtcenv) = FApi.tc_hyps  !tc
   let tc_env   (tc : rtcenv) = FApi.tc_env   !tc
+
+  let tc_flat  ?target (tc : rtcenv) = FApi.tc_flat  ?target !tc
+  let tc_eflat ?target (tc : rtcenv) = FApi.tc_eflat ?target !tc
+  let tc_hyps  ?target (tc : rtcenv) = FApi.tc_hyps  ?target !tc
 end
 
 type rproofenv = RApi.rproofenv
@@ -868,12 +963,10 @@ let closed (pf : proof) = List.is_empty pf.pr_opened
 
 (* -------------------------------------------------------------------- *)
 module Exn = struct
-  let recast pe hyps f x =
+  let recast pe _hyps f x =
     try  f x
-    with EcTyping.RestrictionError e ->
-      tc_error_lazy pe (fun fmt -> 
-        let env = EcEnv.LDecl.toenv hyps in
-        EcTyping.pp_restriction_error env fmt e)
+    with (EcTyping.RestrictionError _) as e ->
+      tc_error_exn pe e
 
   let recast_pe pe hyps f =
     recast pe hyps f ()

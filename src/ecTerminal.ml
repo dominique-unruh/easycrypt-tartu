@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -57,8 +59,10 @@ object(self)
       | `Debug | `Warning | `Critical -> "[W]"
       | `Info -> ""
     in
-      List.iter
-        (fun x -> Printf.printf "%s%s\n%!" prefix x)
+      List.iteri
+        (fun i x ->
+          Printf.printf "%s%s%s\n%!"
+          prefix (if i = 0 then "+ " else "| ") x)
         (String.split_lines msg)
 
   method next =
@@ -104,7 +108,7 @@ let from_emacs () = new from_emacs ()
 (* -------------------------------------------------------------------- *)
 class from_tty () : terminal =
 object
-  val iparser  = EcIo.from_channel ~name:"<tty>" stdin
+  val iparser = EcIo.from_channel ~name:"<tty>" stdin
 
   method interactive = true
 
@@ -134,7 +138,7 @@ end
 let from_tty () = new from_tty ()
 
 (* -------------------------------------------------------------------- *)
-class from_channel ~name (stream : in_channel) : terminal =
+class from_channel ~name ?(gcstats = true) (stream : in_channel) : terminal =
 object(self)
   val ticks = "-\\|/"
 
@@ -142,34 +146,41 @@ object(self)
   val mutable sz    = -1
   val mutable tick  = -1
   val mutable loc   = LC._dummy
+  val mutable gc    = None
   val mutable doprg =
     (Sys.os_type = "Unix") &&
-    (Unix.isatty (Unix.descr_of_out_channel stdout))
-
+    (Unix.isatty (Unix.descr_of_out_channel stderr))
 
   method private _update_progress =
-    let lineno   = fst (loc.LC.loc_end) in
-    let position = loc.LC.loc_echar in
-
-    let mem = (Gc.stat ()).Gc.live_words in
-    let mem = (float_of_int mem) *. (float_of_int (Sys.word_size / 8)) in
-
-    let unu = (Gc.stat ()).Gc.fragments  in
-    let unu = (float_of_int unu) *. (float_of_int (Sys.word_size / 8)) in
-
-    let rec human x st all =
-      match all with
-      | [] -> (x, st)
-      | _ when x < 1024.-> (x, st)
-      | st' :: all -> human (x /. 1024.) st' all in
-
-    let mem, memst = human mem "B" ["kB"; "MB"; "GB"] in
-    let unu, unust = human unu "B" ["kB"; "MB"; "GB"] in
-
     if sz >= 0 && doprg then begin
-      tick <- (tick + 1) mod (String.length ticks);
+      let lineno   = fst (loc.LC.loc_end) in
+      let position = loc.LC.loc_echar in
+
+      let mem, unu =
+        if not gcstats then -1., -1. else
+        match gc with
+        | Some (mem, unu, btick) when btick > tick-20 ->
+           (mem, unu)
+        | _ ->
+           let mem = (Gc.stat ()).Gc.live_words in
+           let mem = (float_of_int mem) *. (float_of_int (Sys.word_size / 8)) in
+           let unu = (Gc.stat ()).Gc.fragments  in
+           let unu = (float_of_int unu) *. (float_of_int (Sys.word_size / 8)) in
+           gc <- Some (mem, unu, tick); (mem, unu)
+      in
+
+      let rec human x st all =
+        match all with
+        | [] -> (x, st)
+        | _ when x < 1024.-> (x, st)
+        | st' :: all -> human (x /. 1024.) st' all in
+
+      let mem, memst = human mem "B" ["kB"; "MB"; "GB"] in
+      let unu, unust = human unu "B" ["kB"; "MB"; "GB"] in
+
+      tick <- tick + 1;
       Printf.eprintf "[%c] [%.4d] %.1f %% (%.1f%s / [frag %.1f%s])\r%!"
-        ticks.[tick] lineno
+        ticks.[tick mod (String.length ticks)] lineno
         (100. *. ((float_of_int position) /. (float_of_int sz)))
         mem memst unu unust
     end
@@ -180,7 +191,7 @@ object(self)
         if sz >= 0 && doprg then
           Printf.eprintf "%*s\r%!" (String.length fmt) ""
     end else Printf.eprintf "\n%!";
-    doprg <- not final
+    doprg <- doprg && not final
 
   method private _notice ?subloc ~immediate (lvl : loglevel) (msg : string) =
     let (_ : unit) = ignore immediate in
@@ -236,4 +247,5 @@ object(self)
   end
 end
 
-let from_channel ~name stream = new from_channel ~name stream
+let from_channel ?gcstats ~name stream =
+  new from_channel ?gcstats ~name stream

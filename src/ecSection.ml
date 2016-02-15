@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -72,25 +74,30 @@ let on_mpath_lp cb (lp : lpattern) =
   | LTuple  xs      -> List.iter (fun (_, ty) -> on_mpath_ty cb ty) xs
   | LRecord (_, xs) -> List.iter (on_mpath_ty cb |- snd) xs
 
+let on_mpath_binding cb ((_, ty) : (EcIdent.t * ty)) =
+  on_mpath_ty cb ty
+
+let on_mpath_bindings cb bds =
+  List.iter (on_mpath_binding cb) bds
+
 let rec on_mpath_expr cb (e : expr) =
   let cbrec = on_mpath_expr cb in
 
-  let fornode () =
+  let rec fornode () =
     match e.e_node with
     | Eint   _            -> ()
     | Elocal _            -> ()
-    | Evar   _            -> ()
-    | Eop    (_, tys)     -> List.iter (on_mpath_ty cb) tys
-    | Eapp   (e, es)      -> List.iter cbrec (e :: es)
+    | Equant (_, bds, e)  -> on_mpath_bindings cb bds; cbrec e
+    | Evar   pv           -> on_mpath_pv cb pv
     | Elet   (lp, e1, e2) -> on_mpath_lp cb lp; List.iter cbrec [e1; e2]
     | Etuple es           -> List.iter cbrec es
-    | Eproj  (e,_)        -> cbrec e
-    | Eif    (e1, e2, e3) -> List.iter cbrec [e1; e2; e3]
-    | Elam   (xs, e)      ->
-        List.iter (fun (_, ty) -> on_mpath_ty cb ty) xs;
-        cbrec e
-  in
-    on_mpath_ty cb e.e_ty;  fornode ()
+    | Eop    (_, tys)     -> List.iter (on_mpath_ty cb) tys
+    | Eapp   (e, es)      -> List.iter cbrec (e :: es)
+    | Eif    (c, e1, e2)  -> List.iter cbrec [c; e1; e2]
+    | Ematch (e, es, ty)  -> on_mpath_ty cb ty; List.iter cbrec (e :: es)
+    | Eproj  (e, _)       -> cbrec e
+
+  in on_mpath_ty cb e.e_ty; fornode ()
 
 let on_mpath_lv cb (lv : lvalue) =
   let for1 (pv, ty) = on_mpath_pv cb pv; on_mpath_ty cb ty in
@@ -107,15 +114,27 @@ let on_mpath_lv cb (lv : lvalue) =
 
 let rec on_mpath_instr cb (i : instr)=
   match i.i_node with
-  | Sasgn   _ -> ()
-  | Srnd    _ -> ()
-  | Sassert _ -> ()
+  | Srnd (lv, e) | Sasgn (lv, e) ->
+      on_mpath_lv cb lv;
+      on_mpath_expr cb e
+
+  | Sassert e ->
+      on_mpath_expr cb e
+
+  | Scall (lv, f, args) ->
+      lv |> oiter (on_mpath_lv cb);
+      cb f.x_top;
+      List.iter (on_mpath_expr cb) args
+
+  | Sif (e, s1, s2) ->
+      on_mpath_expr cb e;
+      List.iter (on_mpath_stmt cb) [s1; s2]
+
+  | Swhile (e, s) ->
+      on_mpath_expr cb e;
+      on_mpath_stmt cb s
+
   | Sabstract _ -> ()
-
-  | Scall (_, f, _) -> cb f.x_top
-  | Sif (_, s1, s2) -> List.iter (on_mpath_stmt cb) [s1; s2]
-  | Swhile (_, s)   -> on_mpath_stmt cb s
-
 
 and on_mpath_stmt cb (s : stmt) =
   List.iter (on_mpath_instr cb) s.s_node
@@ -133,18 +152,21 @@ let rec on_mpath_modty cb mty =
   List.iter (fun (_, mty) -> on_mpath_modty cb mty) mty.mt_params;
   List.iter cb mty.mt_args
 
-let on_mpath_binding cb b =
+let on_mpath_gbinding cb b =
   match b with
-  | EcFol.GTty    ty        -> on_mpath_ty cb ty
+  | EcFol.GTty ty ->
+      on_mpath_ty cb ty
   | EcFol.GTmodty (mty, (rx,r)) ->
-    on_mpath_modty cb mty;
-    Sx.iter (fun x -> cb x.x_top) rx;
-    Sm.iter cb r
-  | EcFol.GTmem   None      -> ()
-  | EcFol.GTmem   (Some m)  -> on_mpath_lcmem cb m
+      on_mpath_modty cb mty;
+      Sx.iter (fun x -> cb x.x_top) rx;
+      Sm.iter cb r
+  | EcFol.GTmem None->
+      ()
+  | EcFol.GTmem (Some m) ->
+      on_mpath_lcmem cb m
 
-let on_mpath_bindings cb b =
-  List.iter (fun (_, b) -> on_mpath_binding cb b) b
+let on_mpath_gbindings cb b =
+  List.iter (fun (_, b) -> on_mpath_gbinding cb b) b
 
 let rec on_mpath_form cb (f : EcFol.form) =
   let cbrec = on_mpath_form cb in
@@ -153,13 +175,14 @@ let rec on_mpath_form cb (f : EcFol.form) =
     match f.EcFol.f_node with
     | EcFol.Fint      _            -> ()
     | EcFol.Flocal    _            -> ()
-    | EcFol.Fquant    (_, b, f)    -> on_mpath_bindings cb b; cbrec f
+    | EcFol.Fquant    (_, b, f)    -> on_mpath_gbindings cb b; cbrec f
     | EcFol.Fif       (f1, f2, f3) -> List.iter cbrec [f1; f2; f3]
-    | EcFol.Flet      (_, f1, f2)  -> List.iter cbrec [f1; f2]
-    | EcFol.Fop       (_, ty)      -> List.iter (on_mpath_ty cb) ty
+    | EcFol.Fmatch    (b, fs, ty)  -> on_mpath_ty cb ty; List.iter cbrec (b :: fs)
+    | EcFol.Flet      (lp, f1, f2) -> on_mpath_lp cb lp; List.iter cbrec [f1; f2]
+    | EcFol.Fop       (_, tys)     -> List.iter (on_mpath_ty cb) tys
     | EcFol.Fapp      (f, fs)      -> List.iter cbrec (f :: fs)
     | EcFol.Ftuple    fs           -> List.iter cbrec fs
-    | EcFol.Fproj     (f,_)        -> cbrec f
+    | EcFol.Fproj     (f, _)       -> cbrec f
     | EcFol.Fpvar     (pv, _)      -> on_mpath_pv  cb pv
     | EcFol.Fglob     (mp, _)      -> cb mp
     | EcFol.FhoareF   hf           -> on_mpath_hf  cb hf
@@ -272,6 +295,7 @@ and on_mpath_uses cb uses =
 and on_mpath_fun_oi cb oi =
   List.iter (fun x -> cb x.x_top) oi.oi_calls
 
+(* -------------------------------------------------------------------- *)
 exception UseLocal
 
 let check_use_local lc mp =
@@ -286,10 +310,88 @@ let form_use_local f lc =
   try  on_mpath_form (check_use_local lc) f; false
   with UseLocal -> true
 
+(* -------------------------------------------------------------------- *)
+let form_use_local_or_abs f lc =
+  try  on_mpath_form (check_use_local_or_abs lc) f; false
+  with UseLocal -> true
+
+(* -------------------------------------------------------------------- *)
 let module_use_local_or_abs m lc =
   try  on_mpath_module (check_use_local_or_abs lc) m; false
   with UseLocal -> true
 
+(* -------------------------------------------------------------------- *)
+let opdecl_use_local_or_abs opdecl lc =
+  let cb = check_use_local_or_abs lc in
+
+  try
+    on_mpath_ty cb opdecl.op_ty;
+    (match opdecl.op_kind with
+     | OB_pred None -> ()
+
+     | OB_pred (Some (PR_Plain f)) ->
+        on_mpath_form cb f
+
+     | OB_pred (Some (PR_Ind pri)) ->
+        on_mpath_bindings cb pri.pri_args;
+        List.iter (fun ctor ->
+          on_mpath_gbindings cb ctor.prc_bds;
+          List.iter (on_mpath_form cb) ctor.prc_spec)
+        pri.pri_ctors
+
+     | OB_nott nott -> begin
+        List.iter (on_mpath_ty cb |- snd) nott.ont_args;
+        on_mpath_ty cb nott.ont_resty;
+        on_mpath_expr cb nott.ont_body
+       end
+
+
+     | OB_oper None   -> ()
+     | OB_oper Some b ->
+         match b with
+         | OP_Constr _ -> ()
+         | OP_Record _ -> ()
+         | OP_Proj   _ -> ()
+         | OP_TC       -> ()
+         | OP_Plain  e -> on_mpath_expr cb e
+         | OP_Fix    f ->
+           let rec on_mpath_branches br =
+             match br with
+             | OPB_Leaf (bds, e) ->
+                 List.iter (on_mpath_bindings cb) bds;
+                 on_mpath_expr cb e
+             | OPB_Branch br ->
+                 Parray.iter on_mpath_branch br
+
+           and on_mpath_branch br =
+             on_mpath_branches br.opb_sub
+
+           in on_mpath_branches f.opf_branches);
+    false
+
+  with UseLocal -> true
+
+(* -------------------------------------------------------------------- *)
+let tydecl_use_local_or_abs tydecl lc =
+  let cb = check_use_local_or_abs lc in
+
+  try
+    (match tydecl.tyd_type with
+    | `Concrete ty -> on_mpath_ty cb ty
+    | `Abstract _  -> ()
+
+    | `Record (f, fds) ->
+        on_mpath_form cb f;
+        List.iter (on_mpath_ty cb |- snd) fds
+
+    | `Datatype dt ->
+        List.iter (List.iter (on_mpath_ty cb) |- snd) dt.tydt_ctors;
+        List.iter (on_mpath_form cb) [dt.tydt_schelim; dt.tydt_schcase]);
+    false
+
+  with UseLocal -> true
+
+(* -------------------------------------------------------------------- *)
 let abstracts lc = lc.lc_abstracts
 
 let generalize env lc (f : EcFol.form) =
@@ -318,7 +420,7 @@ let generalize env lc (f : EcFol.form) =
     let f =
       let do1 p f =
         let ax = EcEnv.Ax.by_path p env in
-          EcFol.f_imp (oget ax.ax_spec) f
+        EcFol.f_imp ax.ax_spec f
       in
           List.fold_right do1 axioms f in
     let f =

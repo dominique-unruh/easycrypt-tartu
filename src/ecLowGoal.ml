@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -16,15 +18,29 @@ open EcMatching
 open EcReduction
 open EcCoreGoal
 open EcBaseLogic
+open EcProofTerm
 
 module EP  = EcParsetree
 module ER  = EcReduction
 module TTC = EcProofTyping
 module LG  = EcCoreLib.CI_Logic
+module PT  = EcProofTerm
 
 (* -------------------------------------------------------------------- *)
-let (@!) t1 t2 = FApi.t_seq t1 t2
-let (@+) t ts = FApi.t_seqsub t ts 
+let (@!) (t1 : FApi.backward) (t2 : FApi.backward) =
+  FApi.t_seq t1 t2
+
+let (@+) (t : FApi.backward) (ts : FApi.backward list) =
+  FApi.t_seqsub t ts
+
+let (@~) (t : FApi.backward) (tt : FApi.tactical) =
+  fun tc -> tt (t tc)
+
+let (@!+) (tt : FApi.tactical) (t : FApi.backward) =
+  fun tc -> FApi.t_onall t (tt tc)
+
+let (@~+) (tt : FApi.tactical) (ts : FApi.backward list) =
+  fun tc -> FApi.t_sub ts (tt tc)
 
 (* -------------------------------------------------------------------- *)
 exception InvalidProofTerm
@@ -34,40 +50,85 @@ type lazyred = EcProofTyping.lazyred
 
 (* -------------------------------------------------------------------- *)
 module LowApply = struct
-  type ckenv = [`Tc of rtcenv | `Hyps of LDecl.hyps * proofenv]
+  type ckenv = [
+    | `Tc   of rtcenv * ident option
+    | `Hyps of EcEnv.LDecl.hyps * proofenv
+  ]
 
   (* ------------------------------------------------------------------ *)
   let hyps_of_ckenv = function
     | `Hyps hyps -> (fst hyps)
-    | `Tc   tc   -> RApi.tc_hyps tc
+    | `Tc (tc, target) -> RApi.tc_hyps ?target tc
+
+  (* ------------------------------------------------------------------ *)
+  let eq_hyps (hy1 : LDecl.hyps) (hy2 : LDecl.hyps) =
+    if hy1 (*φ*)== hy2 then true else
+
+    let env1, ld1 = LDecl.baseenv hy1, LDecl.tohyps hy1 in
+    let env2, ld2 = LDecl.baseenv hy2, LDecl.tohyps hy2 in
+
+    if env1        (*φ*)!= env2        then false else
+    if ld1.h_tvar  (*φ*)!= ld2.h_tvar  then false else
+    if ld1.h_local (*φ*)== ld2.h_local then true  else
+
+    let env  = env1 in
+    let hyps = LDecl.init env ld1.h_tvar in
+
+    let h_eq (x1, h1) (x2, h2) =
+      (id_equal x1 x2) && ((h1 (*φ*)== h2) || begin
+        match h1, h2 with
+        | LD_var (t1, f1), LD_var (t2, f2) ->
+              EqTest.for_type env t1 t2
+           && oeq (is_alpha_eq hyps) f1 f2
+
+        | LD_mem m1, LD_mem m2 ->
+           oeq EcMemory.lmt_equal m1 m2
+
+        | LD_modty (mt1, mr1), LD_modty (mt2, mr2) ->
+           (mt1 == mt2) && (mr1 == mr2)
+
+        | LD_hyp f1, LD_hyp f2 ->
+           is_alpha_eq hyps f1 f2
+
+        | LD_abs_st au1, LD_abs_st au2 ->
+           au1 == au2
+
+        | _, _ -> false
+      end)
+
+   in List.all2 h_eq ld1.h_local ld2.h_local
 
   (* ------------------------------------------------------------------ *)
   let rec check_pthead (pt : pt_head) (tc : ckenv) =
+    let hyps = hyps_of_ckenv tc in
+
     match pt with
     | PTCut f -> begin
         match tc with
-        | `Hyps  _ -> (PTCut f, f)
-        | `Tc   tc ->
+        | `Hyps ( _, _) -> (PTCut f, f)
+        | `Tc   (tc, _) ->
             (* cut - create a dedicated subgoal *)
-            let handle = RApi.newgoal tc f in (PTHandle handle, f)
+            let handle = RApi.newgoal tc ~hyps f in
+            (PTHandle handle, f)
     end
 
     | PTHandle hd -> begin
         let subgoal =
           match tc with
           | `Hyps tc -> FApi.get_pregoal_by_id hd (snd tc)
-          | `Tc   tc -> RApi.tc_get_pregoal_by_id hd tc
+          | `Tc   tc -> RApi.tc_get_pregoal_by_id hd (fst tc)
         in
         (* proof reuse - fetch corresponding subgoal*)
-        if subgoal.g_hyps !=(*φ*) hyps_of_ckenv tc then
+        if not (eq_hyps subgoal.g_hyps (hyps_of_ckenv tc)) then
           raise InvalidProofTerm;
+
         (pt, subgoal.g_concl)
     end
 
     | PTLocal x -> begin
         let hyps = hyps_of_ckenv tc in
-        try  (pt, LDecl.lookup_hyp_by_id x hyps)
-        with LDecl.Ldecl_error _ -> raise InvalidProofTerm
+        try  (pt, LDecl.hyp_by_id x hyps)
+        with LDecl.LdeclError _ -> raise InvalidProofTerm
     end
 
     | PTGlobal (p, tys) ->
@@ -154,6 +215,10 @@ module LowApply = struct
 end
 
 (* -------------------------------------------------------------------- *)
+let t_abort (_ : tcenv1) =
+  raise InvalidGoalShape
+
+(* -------------------------------------------------------------------- *)
 let t_admit (tc : tcenv1) =
   FApi.close (FApi.tcenv_of_tcenv1 tc) VAdmit
 
@@ -174,56 +239,96 @@ let t_id (tc : tcenv1) =
   FApi.tcenv_of_tcenv1 tc
 
 (* -------------------------------------------------------------------- *)
-let t_change (fp : form) (tc : tcenv1) =
-  let hyps, concl = FApi.tc1_flat tc in
+let t_change_r ?target action (tc : tcenv1) =
+  match target with
+  | None -> begin
+      let hyps, concl = FApi.tc1_flat tc in
+      match action (lazy hyps) concl with
+      | None -> tc
+      | Some fp when fp == concl -> tc
+      | Some fp -> FApi.mutate1 tc (fun hd -> VConv (hd, Sid.empty)) fp
+  end
 
-  if concl == fp then tc else begin
-    if not (EcReduction.is_conv hyps fp concl) then
-      raise InvalidGoalShape;
-    FApi.mutate1 tc (fun hd -> VConv (hd, Sid.empty)) fp
+  | Some tg -> begin
+      let action hyps fp = action hyps fp |> odfl fp in
+      match LDecl.hyp_convert tg action (FApi.tc1_hyps tc) with
+      | None      -> tc
+      | Some hyps ->
+          let concl = FApi.tc1_goal tc in
+          FApi.mutate1 tc (fun hd -> VLConv (hd, tg)) ~hyps concl
   end
 
 (* -------------------------------------------------------------------- *)
-let t_simplify_with_info (ri : reduction_info) (tc : tcenv1) =
-  let hyps, concl = FApi.tc1_flat tc in
-  let concl = EcReduction.simplify ri hyps concl in
-  FApi.xmutate1 tc (fun hd -> VConv (hd, Sid.empty)) [concl]
+let t_change ?target (fp : form) (tc : tcenv1) =
+  let action (lazy hyps) tgfp =
+    if not (EcReduction.is_conv hyps fp tgfp) then
+      raise InvalidGoalShape;
+    if fp == tgfp then None else Some fp
+
+  in t_change_r ?target action tc
 
 (* -------------------------------------------------------------------- *)
-let t_simplify ?(delta=true) (tc : tcenv1) =
+let t_simplify_with_info ?target (ri : reduction_info) (tc : tcenv1) =
+  let action (lazy hyps) fp = Some (EcReduction.simplify ri hyps fp) in
+  FApi.tcenv_of_tcenv1 (t_change_r ?target action tc)
+
+(* -------------------------------------------------------------------- *)
+let t_simplify ?target ?(delta = true) ?(logic = Some `Full) (tc : tcenv1) =
   let ri = if delta then full_red else nodelta in
-  t_simplify_with_info ri tc
+  let ri = { ri with logic } in
+  t_simplify_with_info ?target ri tc
 
 (* -------------------------------------------------------------------- *)
-let t_clears xs tc =
+let t_clears1 ?(leniant = false) xs tc =
   let (hyps, concl) = FApi.tc1_flat tc in
 
-  if not (Mid.set_disjoint xs concl.f_fv) then
-    let ids () = Sid.elements (Mid.set_inter xs concl.f_fv) in
-    raise (ClearError (lazy (`ClearInGoal (ids ()))))
-  else
+  let xs =
+    if not (Mid.set_disjoint xs concl.f_fv) then
+      if leniant then Mid.set_diff xs concl.f_fv else
+      let ids () = Sid.elements (Mid.set_inter xs concl.f_fv) in
+      raise (ClearError (lazy (`ClearInGoal (ids ()))))
+    else xs
+  in
+
+  if Sid.is_empty xs then tc else
 
   let hyps =
-    try  LDecl.clear xs hyps
-    with LDecl.Ldecl_error (LDecl.CanNotClear(id1, id2)) ->
+    try  LDecl.clear ~leniant xs hyps
+    with LDecl.LdeclError (LDecl.CannotClear (id1, id2)) ->
       raise (ClearError (lazy (`ClearDep (id1, id2))))
   in
 
-  FApi.mutate (!@tc) (fun hd -> VConv (hd, xs)) ~hyps concl
+  FApi.mutate1 tc (fun hd -> VConv (hd, xs)) ~hyps concl
 
 (* -------------------------------------------------------------------- *)
-let t_clear x tc =
-  t_clears (Sid.singleton x) tc
+let t_clear1 ?leniant x tc =
+  t_clears1 ?leniant (Sid.singleton x) tc
 
 (* -------------------------------------------------------------------- *)
-let t_clears xs tc =
-  t_clears (Sid.of_list xs) tc
+let t_clear ?leniant x tc =
+  FApi.tcenv_of_tcenv1 (t_clears1 ?leniant (Sid.singleton x) tc)
+
+(* -------------------------------------------------------------------- *)
+let t_clears1 ?leniant xs tc =
+  t_clears1 ?leniant (Sid.of_list xs) tc
+
+(* -------------------------------------------------------------------- *)
+let t_clears ?leniant xs tc =
+  FApi.tcenv_of_tcenv1 (t_clears1 ?leniant xs tc)
 
 (* -------------------------------------------------------------------- *)
 module LowIntro = struct
-  let valid_value_name (x : symbol) = x = "_" || EcIo.is_sym_ident x
-  let valid_mod_name   (x : symbol) = x = "_" || EcIo.is_mod_ident x
-  let valid_mem_name   (x : symbol) = x = "_" || EcIo.is_mem_ident x
+  let valid_anon_name chk x =
+    if x <> "" then
+      x.[0] = '`' && chk (String.sub x 1 (String.length x - 1))
+    else false
+
+  let valid_name chk x =
+    x = "_" || chk x || valid_anon_name chk x
+
+  let valid_value_name (x : symbol) = valid_name EcIo.is_sym_ident x
+  let valid_mod_name   (x : symbol) = valid_name EcIo.is_mod_ident x
+  let valid_mem_name   (x : symbol) = valid_name EcIo.is_mem_ident x
 
   type kind = [`Value | `Module | `Memory]
 
@@ -347,7 +452,7 @@ let tt_apply (pt : proofterm) (tc : tcenv) =
   let (hyps, concl) = FApi.tc_flat tc in
 
   let tc, (pt, ax)  =
-    RApi.to_pure (fun tc -> LowApply.check `Elim pt (`Tc tc)) tc in
+    RApi.to_pure (fun tc -> LowApply.check `Elim pt (`Tc (tc, None))) tc in
 
   if not (EcReduction.is_conv hyps ax concl) then
     raise InvalidGoalShape;
@@ -398,46 +503,165 @@ let t_apply_hd (hd : handle) ?args ?sk tc =
   tt_apply_hd hd ?args ?sk (FApi.tcenv_of_tcenv1 tc)
 
 (* -------------------------------------------------------------------- *)
-let t_generalize_hyps ?(clear = false) ids tc =
+module Apply = struct
+  type reason = [`DoNotMatch | `IncompleteInference]
+
+  exception NoInstance of (bool * reason * PT.pt_env * (form * form))
+
+  let t_apply_bwd_r ?(mode = fmdelta) ?(canview = true) pt (tc : tcenv1) =
+    let ((hyps, concl), pterr) = (FApi.tc1_flat tc, PT.copy pt.ptev_env) in
+
+    let noinstance ?(dpe = false) reason =
+      raise (NoInstance (dpe, reason, pterr, (pt.ptev_ax, concl))) in
+
+    let rec instantiate canview istop pt =
+      match istop && PT.can_concretize pt.PT.ptev_env with
+      | true ->
+          let ax = PT.concretize_form pt.PT.ptev_env pt.PT.ptev_ax in
+          if   EcReduction.is_conv hyps ax concl
+          then pt
+          else instantiate canview false pt
+
+      | false -> begin
+          try
+            PT.pf_form_match ~mode pt.PT.ptev_env ~ptn:pt.PT.ptev_ax concl;
+            if not (PT.can_concretize pt.PT.ptev_env) then
+              noinstance `IncompleteInference;
+            pt
+          with EcMatching.MatchFailure ->
+            match TTC.destruct_product hyps pt.PT.ptev_ax with
+            | Some _ ->
+                (* FIXME: add internal marker *)
+                instantiate canview false (PT.apply_pterm_to_hole pt)
+
+            | None when not canview ->
+                noinstance `DoNotMatch
+
+            | None ->
+                let forview (p, fs) =
+                  (* Current proof-term is view argument *)
+                  (* Copy PT environment to set a back-track point *)
+                  let argpt = { pt with ptev_env = PT.copy pt.ptev_env } in
+                  let argpt = { ptea_env = argpt.ptev_env;
+                                ptea_arg = PVASub argpt; } in
+
+                  (* Type-check view - FIXME: the current API is perfectible *)
+                  let viewpt =
+                    { pt_head = PTGlobal (p, []);
+                      pt_args = List.map (fun f -> PAFormula f) fs; } in
+                  let viewpt, ax = LowApply.check `Elim viewpt (`Hyps (hyps, !!tc)) in
+
+                  (* Apply view to its actual arguments *)
+                  let viewpt = apply_pterm_to_arg
+                      { ptev_env = argpt.ptea_env;
+                        ptev_pt  = viewpt;
+                        ptev_ax  = ax; }
+                      argpt
+                  in
+                  try  Some (instantiate false true viewpt)
+                  with NoInstance _ -> None
+                in
+
+                let views =
+                  match sform_of_form pt.PT.ptev_ax with
+                  | SFiff (f1, f2) ->
+                      [(LG.p_iff_lr, [f1; f2]);
+                       (LG.p_iff_rl, [f1; f2])]
+
+                  | SFnot f1 ->
+                      [(LG.p_negbTE, [f1])]
+
+                  | _ -> []
+                in
+
+                try  List.find_map forview views
+                with Not_found -> noinstance `DoNotMatch
+      end
+    in
+
+    let pt = instantiate canview true pt in
+    let pt = fst (PT.concretize pt) in
+
+    t_apply pt tc
+
+  let t_apply_bwd ?mode ?canview pt (tc : tcenv1) =
+    let hyps   = FApi.tc1_hyps tc in
+    let pt, ax = LowApply.check `Elim pt (`Hyps (hyps, !!tc)) in
+    let ptenv  = ptenv_of_penv hyps !!tc in
+    let pt     = { ptev_env = ptenv; ptev_pt = pt; ptev_ax = ax; } in
+    t_apply_bwd_r ?mode ?canview pt tc
+
+  let t_apply_bwd_hi ?(dpe = true) ?mode ?canview pt (tc : tcenv1) =
+    try  t_apply_bwd ?mode ?canview pt tc
+    with (NoInstance (_, r, pt, f)) ->
+      tc_error_exn !!tc (NoInstance (dpe, r, pt, f))
+end
+
+(* -------------------------------------------------------------------- *)
+type genclear = [`Clear | `TryClear | `NoClear]
+
+let t_generalize_hyps_x ?(missing = false) ?naming ids tc =
   let env, hyps, concl = FApi.tc1_eflat tc in
 
-  let rec for1 (s, bds, args) id =
-    match LDecl.ld_subst s (LDecl.lookup_by_id id hyps) with
-    | LD_var (ty, _) ->
-        let x    = EcIdent.fresh id in
-        let s    = Fsubst.f_bind_local s id (f_local x ty) in
-        let bds  = `Forall (x, GTty ty) :: bds in
-        let args = PAFormula (f_local id ty) :: args in
-        (s, bds, args)
+  let fresh x =
+    match naming with
+    | None   -> EcIdent.fresh x
+    | Some f ->
+      match f x with
+      | None   -> EcIdent.fresh x
+      | Some x -> EcIdent.create x
+  in
 
-    | LD_mem mt ->
-      let x    = EcIdent.fresh id in
-      let s    = Fsubst.f_bind_mem s id x in
-      let bds  = `Forall (x, GTmem mt) :: bds in
-      let args = PAMemory id :: args in
-      (s, bds, args)
+  let rec for1 (s, bds, args, cls) (clid, id) =
+    try
+      let cls =
+        match clid with
+        | `TryClear -> (true , id) :: cls
+        | `Clear    -> (false, id) :: cls
+        | `NoClear  -> cls
+      in
 
-    | LD_modty (mt,r) ->
-      let x    = EcIdent.fresh id in
-      let s    = Fsubst.f_bind_mod s id (EcPath.mident x) in
-      let mp   = EcPath.mident id in
-      let sig_ = (EcEnv.Mod.by_mpath mp env).EcModules.me_sig in
-      let bds  = `Forall (x, GTmodty (mt, r)) :: bds in
-      let args = PAModule (mp, sig_) :: args in
-      (s, bds, args)
+      match LDecl.ld_subst s (LDecl.by_id id hyps) with
+      | LD_var (ty, _) ->
+          let x    = fresh id in
+          let s    = Fsubst.f_bind_local s id (f_local x ty) in
+          let bds  = `Forall (x, GTty ty) :: bds in
+          let args = PAFormula (f_local id ty) :: args in
+          (s, bds, args, cls)
 
-    | LD_hyp f ->
+      | LD_mem mt ->
+        let x    = fresh id in
+        let s    = Fsubst.f_bind_mem s id x in
+        let bds  = `Forall (x, GTmem mt) :: bds in
+        let args = PAMemory id :: args in
+        (s, bds, args, cls)
+
+      | LD_modty (mt,r) ->
+        let x    = fresh id in
+        let s    = Fsubst.f_bind_mod s id (EcPath.mident x) in
+        let mp   = EcPath.mident id in
+        let sig_ = (EcEnv.Mod.by_mpath mp env).EcModules.me_sig in
+        let bds  = `Forall (x, GTmodty (mt, r)) :: bds in
+        let args = PAModule (mp, sig_) :: args in
+        (s, bds, args, cls)
+
+      | LD_hyp f ->
         let bds  = `Imp f :: bds in
         let args = palocal id :: args in
-        (s, bds, args)
+        (s, bds, args, cls)
 
-    | LD_abs_st _ ->
-        raise InvalidGoalShape
+      | LD_abs_st _ ->
+          raise InvalidGoalShape
+
+    with LDecl.LdeclError _ when missing -> (s, bds, args, cls)
 
   in
 
-  let (s, bds, args) = (Fsubst.f_subst_id, [], []) in
-  let (s, bds, args) = List.fold_left for1 (s, bds, args) ids in
+  let (s, bds, args, cls) = (Fsubst.f_subst_id, [], [], []) in
+  let (s, bds, args, cls) = List.fold_left for1 (s, bds, args, cls) ids in
+
+  let cltry, cldo = List.partition fst cls in
+  let cltry, cldo = (List.map snd cltry, List.map snd cldo) in
 
   let ff =
     List.fold_left
@@ -449,11 +673,23 @@ let t_generalize_hyps ?(clear = false) ids tc =
 
   let pt = { pt_head = PTCut ff; pt_args = List.rev args; } in
   let tc = t_apply pt tc in
+  let ct = fun tc -> tc
+    |> t_clears1 ~leniant:true  cltry
+    |> t_clears1 ~leniant:false cldo
+    |> FApi.tcenv_of_tcenv1
 
-  if clear then FApi.t_onall (t_clears ids) tc else tc
+  in FApi.t_onall ct tc
 
-let t_generalize_hyp ?clear id tc =
-  t_generalize_hyps ?clear [id] tc
+let t_generalize_hyps ?(clear = `No) ?missing ?naming ids tc =
+  let ids =
+    match clear with
+    | `Yes -> List.map (fun x -> (`Clear   , x)) ids
+    | `Try -> List.map (fun x -> (`TryClear, x)) ids
+    | `No  -> List.map (fun x -> (`NoClear , x)) ids
+  in t_generalize_hyps_x ?missing ?naming ids tc
+
+let t_generalize_hyp ?clear ?missing ?naming id tc =
+  t_generalize_hyps ?clear ?missing ?naming [id] tc
 
 (* -------------------------------------------------------------------- *)
 module LowAssumption = struct
@@ -483,7 +719,7 @@ module LowAssumption = struct
 end
 
 (* -------------------------------------------------------------------- *)
-let alpha_find_in_hyps hyps f = 
+let alpha_find_in_hyps hyps f =
    LowAssumption.gen_find_in_hyps (EcReduction.is_alpha_eq hyps f) hyps
 
 let t_assumption mode (tc : tcenv1) =
@@ -689,7 +925,7 @@ let t_elim_false_r ((_, sf) : form * sform) concl tc =
   | SFfalse -> t_apply_s LG.p_false_elim [] ~args:[concl] tc
   | _ -> raise TTC.NoMatch
 
-let t_elim_false tc = t_elim_r [t_elim_false_r] tc
+let t_elim_false ?reduce tc = t_elim_r ?reduce [t_elim_false_r] tc
 
 (* --------------------------------------------------------------------- *)
 let t_elim_and_r ((_, sf) : form * sform) concl tc =
@@ -704,7 +940,7 @@ let t_elim_and_r ((_, sf) : form * sform) concl tc =
 
   | _ -> raise TTC.NoMatch
 
-let t_elim_and goal = t_elim_r [t_elim_and_r] goal
+let t_elim_and ?reduce goal = t_elim_r ?reduce [t_elim_and_r] goal
 
 (* --------------------------------------------------------------------- *)
 let t_elim_or_r ((_, sf) : form * sform) concl tc =
@@ -719,7 +955,7 @@ let t_elim_or_r ((_, sf) : form * sform) concl tc =
 
   | _ -> raise TTC.NoMatch
 
-let t_elim_or tc = t_elim_r [t_elim_or_r] tc
+let t_elim_or ?reduce tc = t_elim_r ?reduce [t_elim_or_r] tc
 
 (* --------------------------------------------------------------------- *)
 let t_elim_iff_r ((_, sf) : form * sform) concl tc =
@@ -728,7 +964,7 @@ let t_elim_iff_r ((_, sf) : form * sform) concl tc =
       t_apply_s LG.p_iff_elim [] ~args:[a1; a2; concl] ~sk:1 tc
   | _ -> raise TTC.NoMatch
 
-let t_elim_iff tc = t_elim_r [t_elim_iff_r] tc
+let t_elim_iff ?reduce tc = t_elim_r ?reduce [t_elim_iff_r] tc
 
 (* -------------------------------------------------------------------- *)
 let t_elim_if_r ((_, sf) : form * sform) concl tc =
@@ -737,7 +973,7 @@ let t_elim_if_r ((_, sf) : form * sform) concl tc =
       t_apply_s LG.p_if_elim [] ~args:[a1; a2; a3; concl] ~sk:2 tc
   | _ -> raise TTC.NoMatch
 
-let t_elim_if tc = t_elim_r [t_elim_if_r] tc
+let t_elim_if ?reduce tc = t_elim_r ?reduce [t_elim_if_r] tc
 
 (* -------------------------------------------------------------------- *)
 let gen_tuple_eq_elim (tys : ty list) : form =
@@ -789,7 +1025,7 @@ let t_elim_eq_tuple_r ((_, sf) : form * sform) concl tc =
 
   | _ -> raise TTC.NoMatch
 
-let t_elim_eq_tuple goal = t_elim_r [t_elim_eq_tuple_r] goal
+let t_elim_eq_tuple ?reduce goal = t_elim_r ?reduce [t_elim_eq_tuple_r] goal
 
 (* -------------------------------------------------------------------- *)
 let t_elim_exists_r ((f, _) : form * sform) concl tc =
@@ -802,14 +1038,14 @@ let t_elim_exists_r ((f, _) : form * sform) concl tc =
       FApi.tcenv_of_tcenv1 tc
   | _ -> raise TTC.NoMatch
 
-let t_elim_exists tc = t_elim_r [t_elim_exists_r] tc
+let t_elim_exists ?reduce tc = t_elim_r ?reduce [t_elim_exists_r] tc
 
 (* -------------------------------------------------------------------- *)
 (* FIXME: document this function ! *)
 let t_elimT_form (ind : proofterm) ?(sk = 0) (f : form) (tc : tcenv1) =
   let tc    = FApi.tcenv_of_tcenv1 tc in
   let _, ax =
-    snd (RApi.to_pure (fun tc -> LowApply.check `Elim ind (`Tc tc)) tc) in
+    snd (RApi.to_pure (fun tc -> LowApply.check `Elim ind (`Tc (tc, None))) tc) in
 
   let hyps, concl = FApi.tc_flat tc in
   let env = LDecl.toenv hyps in
@@ -956,7 +1192,7 @@ let t_elimT_ind ?reduce mode (tc : tcenv1) =
     | SFquant (Lforall, (x, GTty ty), _) -> begin
         let hyps = FApi.tc1_hyps tc in
         let id   = LDecl.fresh_id hyps (EcIdent.name x) in
-  
+
         FApi.t_seqs
           [t_intros_i_seq ~clear:true [id] (elim (id, ty));
            t_simplify_with_info EcReduction.beta_red]
@@ -981,14 +1217,57 @@ let t_elim_default_r = [
 let t_elim ?reduce tc = t_elim_r ?reduce t_elim_default_r tc
 
 (* -------------------------------------------------------------------- *)
+let t_case fp tc = t_elimT_form_global LG.p_case_eq_bool fp tc
+
+(* -------------------------------------------------------------------- *)
 let t_elim_hyp h tc =
   (* FIXME: exception? *)
-  let f  = LDecl.lookup_hyp_by_id h (FApi.tc1_hyps tc) in
+  let f  = LDecl.hyp_by_id h (FApi.tc1_hyps tc) in
   let pt = { pt_head = PTLocal h; pt_args = []; } in
   FApi.t_seq (t_cutdef pt f) t_elim tc
 
 (* -------------------------------------------------------------------- *)
-let t_case fp tc = t_elimT_form_global LG.p_case_eq_bool fp tc
+let t_elim_prind_r ?reduce ?accept (_mode : [`Case | `Ind]) tc =
+  let doit fp tc =
+    let env = FApi.tc1_env tc in
+
+    match sform_of_form fp with
+    | SFimp (f1, f2) ->
+       let (p, sk), tv, args =
+         match fst_map f_node (destr_app f1) with
+         | Fop (p, tv), args when EcEnv.Op.is_prind env p -> begin
+            if is_some accept then
+              let pri = oget (EcEnv.Op.by_path_opt p env) in
+              let pri = EcDecl.operator_as_prind pri in
+              if not (oget accept pri) then
+                raise InvalidGoalShape;
+           end;
+           (oget (EcEnv.Op.scheme_of_prind env `Case p), tv, args)
+
+         | _ -> raise InvalidGoalShape
+
+       in t_apply_s p tv ~args:(args @ [f2]) ~sk tc
+
+    | _ -> raise TTC.NoMatch
+
+  in TTC.t_lazy_match ?reduce doit tc
+
+(* -------------------------------------------------------------------- *)
+let t_elim_prind = t_elim_prind_r ?accept:None
+
+(* -------------------------------------------------------------------- *)
+let t_elim_iso_and ?reduce tc =
+  try
+    (2, t_elim_and ?reduce tc)
+  with InvalidGoalShape ->
+    let outgoals = ref (-1) in
+
+    let accept pri =
+      match EcInductive.prind_is_iso_ands pri with
+      | None -> false
+      | Some (_, ngoals) -> outgoals := ngoals; true in
+
+    let tc = t_elim_prind_r ?reduce ~accept `Case tc in (!outgoals, tc)
 
 (* -------------------------------------------------------------------- *)
 let t_split ?(closeonly = false) ?reduce (tc : tcenv1) =
@@ -1017,23 +1296,76 @@ let t_split ?(closeonly = false) ?reduce (tc : tcenv1) =
     TTC.t_lazy_match ?reduce t_split_r tc
 
 (* -------------------------------------------------------------------- *)
-type rwspec = [`LtoR|`RtoL] * ptnpos option
+let t_split_prind ?reduce (tc : tcenv1) =
+  let t_split_r (fp : form) (tc : tcenv1) =
+    let env = FApi.tc1_env tc in
+
+    let p, tv, args =
+      match fst_map f_node (destr_app fp) with
+      | Fop (p, tv), args when EcEnv.Op.is_prind env p ->
+         (p, tv, args)
+      | _ -> raise InvalidGoalShape in
+    let pri = oget (EcEnv.Op.by_path_opt p env) in
+    let pri = EcDecl.operator_as_prind pri in
+
+    match EcInductive.prind_is_iso_ands pri with
+    | None -> raise InvalidGoalShape
+    | Some (x, sk) ->
+       let p = EcInductive.prind_introsc_path p x in
+       t_apply_s p tv ~args ~sk tc
+
+  in TTC.t_lazy_match ?reduce t_split_r tc
 
 (* -------------------------------------------------------------------- *)
-let t_rewrite (pt : proofterm) (s, pos) (tc : tcenv1) =
-  let tc = RApi.rtcenv_of_tcenv1 tc in
-  let (env, hyps, concl) = RApi.tc_eflat tc in
-  let (pt, ax) = LowApply.check `Elim pt (`Tc tc) in
+let t_or_intro_prind ?reduce (side : side) (tc : tcenv1) =
+  let t_split_r (fp : form) (tc : tcenv1) =
+    let env = FApi.tc1_env tc in
+
+    let p, tv, args =
+      match fst_map f_node (destr_app fp) with
+      | Fop (p, tv), args when EcEnv.Op.is_prind env p ->
+         (p, tv, args)
+      | _ -> raise InvalidGoalShape in
+    let pri = oget (EcEnv.Op.by_path_opt p env) in
+    let pri = EcDecl.operator_as_prind pri in
+
+    match EcInductive.prind_is_iso_ors pri with
+    | Some ((x, sk), _) when side = `Left ->
+       let p = EcInductive.prind_introsc_path p x in
+       t_apply_s p tv ~args ~sk tc
+    | Some (_, (x, sk)) when side = `Right ->
+       let p = EcInductive.prind_introsc_path p x in
+       t_apply_s p tv ~args ~sk tc
+    | _  -> raise InvalidGoalShape
+
+  in TTC.t_lazy_match ?reduce t_split_r tc
+
+(* -------------------------------------------------------------------- *)
+type rwspec = [`LtoR|`RtoL] * ptnpos option
+type rwmode = [`Bool | `Eq]
+
+(* -------------------------------------------------------------------- *)
+let t_rewrite
+  ?xconv ?target ?(mode : rwmode option) (pt : proofterm)
+    (s, pos) (tc : tcenv1)
+=
+  let tc           = RApi.rtcenv_of_tcenv1 tc in
+  let (hyps, tgfp) = RApi.tc_flat ?target tc in
+  let env          = LDecl.toenv hyps in
+  let (pt, ax)     = LowApply.check `Elim pt (`Tc (tc, target)) in
 
   let (left, right) =
-    match sform_of_form ax with
-    | SFeq  (f1, f2) -> (f1, f2)
-    | SFiff (f1, f2) -> (f1, f2)
+    let doit ax =
+      match sform_of_form ax, mode with
+      | SFeq  (f1, f2), (None | Some `Eq) -> (f1, f2)
+      | SFiff (f1, f2), (None | Some `Eq) -> (f1, f2)
 
-    | _ when s = `LtoR && ER.EqTest.for_type env ax.f_ty tbool ->
-        (ax, f_true)
+      | _, (None | Some `Bool) when
+          s = `LtoR && ER.EqTest.for_type env ax.f_ty tbool
+          -> (ax, f_true)
 
-    | _ -> raise InvalidProofTerm
+      | _ -> raise TTC.NoMatch
+    in oget ~exn:InvalidProofTerm (TTC.lazy_destruct hyps doit ax)
   in
 
   let (left, right) =
@@ -1045,27 +1377,38 @@ let t_rewrite (pt : proofterm) (s, pos) (tc : tcenv1) =
   let change f =
     if not (EcReduction.is_conv hyps f left) then
       raise InvalidGoalShape;
-    right
-  in
+    right in
 
-  let newconcl =
-    let pos =
-      pos |> ofdfl (fun () -> FPosition.select_form hyps None left concl) in
+  let npos  =
+    match pos with
+    | None     -> FPosition.select_form ?xconv hyps None left tgfp
+    | Some pos -> pos in
 
-    try  FPosition.map pos change concl
+  let tgfp =
+    try  FPosition.map npos change tgfp
     with InvalidPosition -> raise InvalidGoalShape
   in
 
-  let hd   = RApi.newgoal tc newconcl in
-  let rwpt = { rpt_proof = pt; rpt_occrs = pos; } in
+  match target with
+  | None ->
+      let hd   = RApi.newgoal tc tgfp in
+      let rwpt = { rpt_proof = pt; rpt_occrs = pos; rpt_lc = None; } in
 
-  RApi.close tc (VRewrite (hd, rwpt));
-  RApi.tcenv_of_rtcenv tc
+      RApi.close tc (VRewrite (hd, rwpt));
+      RApi.tcenv_of_rtcenv tc
+
+  | Some (h : ident) ->
+      let hyps = oget (LDecl.hyp_convert h (fun _ _ -> tgfp) (RApi.tc_hyps tc)) in
+      let hd   = RApi.newgoal tc ~hyps (RApi.tc_goal tc) in
+      let rwpt = { rpt_proof = pt; rpt_occrs = pos; rpt_lc = Some h; } in
+
+      RApi.close tc (VRewrite (hd, rwpt));
+      RApi.tcenv_of_rtcenv tc
 
 (* -------------------------------------------------------------------- *)
-let t_rewrite_hyp (id : EcIdent.t) pos (tc : tcenv1) =
+let t_rewrite_hyp ?xconv ?mode (id : EcIdent.t) pos (tc : tcenv1) =
   let pt = { pt_head = PTLocal id; pt_args = []; } in
-  t_rewrite pt pos tc
+  t_rewrite ?xconv ?mode pt pos tc
 
 (* -------------------------------------------------------------------- *)
 type vsubst = [
@@ -1217,7 +1560,7 @@ let t_subst ?kind ?(clear = true) ?var ?tside ?eqid (tc : tcenv1) =
 
   let eqs =
     eqid
-      |> omap  (fun id -> [id, LD_hyp (LDecl.lookup_hyp_by_id id hyps)])
+      |> omap  (fun id -> [id, LD_hyp (LDecl.hyp_by_id id hyps)])
       |> ofdfl (fun () -> (LDecl.tohyps hyps).h_local)
   in
 
@@ -1265,7 +1608,7 @@ let t_subst ?kind ?(clear = true) ?var ?tside ?eqid (tc : tcenv1) =
           let clear  =
             match var with
             | `Local x when clear -> begin
-              match LDecl.lookup_by_id x hyps with
+              match LDecl.by_id x hyps with
               | LD_var (_, None) -> t_clear x
               | _ -> t_id
             end
@@ -1292,14 +1635,14 @@ let t_subst ?kind ?(clear = true) ?var ?tside ?eqid (tc : tcenv1) =
 let t_absurd_hyp ?(conv  = `AlphaEq) id tc =
   let hyps, concl = FApi.tc1_flat tc in
 
-  let b, f = destr_nots (LDecl.lookup_hyp_by_id id hyps) in
+  let b, f = destr_nots (LDecl.hyp_by_id id hyps) in
 
   let test f' =
     let b', f' = destr_nots f' in
     (b = not b') && EcReduction.xconv conv hyps f f' in
 
   let id' =
-    try  LowAssumption.gen_find_in_hyps test hyps 
+    try  LowAssumption.gen_find_in_hyps test hyps
     with _ -> raise InvalidGoalShape
   in
 
@@ -1311,6 +1654,7 @@ let t_absurd_hyp ?(conv  = `AlphaEq) id tc =
       [ t_apply_hyp hnx; t_apply_hyp hx ]
   ]) tc
 
+(* -------------------------------------------------------------------- *)
 let t_absurd_hyp ?conv ?id tc =
   let tabsurd = t_absurd_hyp ?conv in
 
@@ -1320,6 +1664,36 @@ let t_absurd_hyp ?conv ?id tc =
       let tott (id, lk) =
         match lk with
         | LD_hyp f when is_not f -> Some (tabsurd id)
+        | _ -> None
+
+      in let hyps = (LDecl.tohyps (FApi.tc1_hyps tc)).h_local
+      in let tc = FApi.t_try (FApi.t_ors_pmap tott hyps) tc in
+
+      if not (FApi.tc_done tc) then raise InvalidGoalShape; tc
+
+(* -------------------------------------------------------------------- *)
+let t_false ?(conv = `Eq) id tc =
+  let hy = FApi.tc1_hyps tc in
+  let hh = LDecl.hyp_by_id id hy in
+
+  if not (EcReduction.xconv conv hy hh f_false) then
+    raise InvalidGoalShape;
+
+  FApi.t_internal ~info:"t_false"
+    (FApi.t_seq
+       (t_generalize_hyp ~clear:`No id) t_elim_false)
+    tc
+
+(* -------------------------------------------------------------------- *)
+let t_false ?conv ?id tc =
+  let tfalse = t_false ?conv in
+
+  match id with
+  | Some id -> tfalse id tc
+  | None    ->
+      let tott (id, lk) =
+        match lk with
+        | LD_hyp _ -> Some (tfalse id)
         | _ -> None
 
       in let hyps = (LDecl.tohyps (FApi.tc1_hyps tc)).h_local
@@ -1341,7 +1715,7 @@ and pgo_delta = {
 
 module PGOptions = struct
   let default =
-    let fordelta = 
+    let fordelta =
       { pgod_case  = false;
         pgod_split = true ; }; in
 
@@ -1400,7 +1774,7 @@ let t_progress ?options ?ti (tt : FApi.backward) (tc : tcenv1) =
     FApi.t_or (t_subst ~kind:sk1 ?eqid) (t_subst ~kind:sk2 ?eqid)
   in
 
-  let ts = 
+  let ts =
     if   options.pgo_subst
     then fun id -> FApi.t_or (t_progress_subst ~eqid:id) (ti id)
     else ti in
@@ -1439,9 +1813,9 @@ let t_progress ?options ?ti (tt : FApi.backward) (tc : tcenv1) =
              on_intro:
                (try subst (if option)
                 or default_intro id);
-             default_intro id = 
+             default_intro id =
                try absurd id;   -- ie if id: b and !b is an assumption
-               rewrite_bool id; -- if id: !b -> rewrite b = false, 
+               rewrite_bool id; -- if id: !b -> rewrite b = false,
                                    if id:  b -> rewrite b = true
                default_on_intro id *)
           let iffail tc =
@@ -1476,23 +1850,118 @@ let t_progress ?options ?ti (tt : FApi.backward) (tc : tcenv1) =
   in entry tc
 
 (* -------------------------------------------------------------------- *)
+let t_crush ?(delta = true) (tc : tcenv1) =
+  let t_progress_subst ?eqid =
+    let sk1 = { empty_subst_kind with sk_local = true ; } in
+    let sk2 = {  full_subst_kind with sk_local = false; } in
+    FApi.t_or (t_subst ~kind:sk1 ?eqid) (t_subst ~kind:sk2 ?eqid)
+  in
+
+  let tt = FApi.t_try (t_assumption `Alpha) in
+  let ts id = FApi.t_try (t_progress_subst ~eqid:id) in
+
+  (* Entry of progress: simplify goal, and chain with progress *)
+  let rec entry tc = FApi.t_seq (t_simplify ~delta:false) aux0 tc
+
+  (* Progress (level 0): try to apply user tactic. *)
+  and aux0 tc = FApi.t_seq (FApi.t_try tt) aux1 tc
+
+  (* Progress (level 1): intro/elim top-level assumption. *)
+  and aux1 tc =
+    let hyps, concl = FApi.tc1_flat tc in
+
+    match sform_of_form concl with
+    | SFquant (Lforall, _, _) ->
+      let bd  = fst (destr_forall concl) in
+      let ids = List.map (EcIdent.name |- fst) bd in
+      let ids = LDecl.fresh_ids hyps ids in
+      FApi.t_seqs
+        [t_intros_i ids; aux0;
+         t_generalize_hyps ~clear:`Yes ~missing:true ids]
+        tc
+
+    | SFlet (LTuple fs, f1, _) ->
+      let tys    = List.map snd fs in
+      let tc, hd = FApi.bwd1_of_fwd (pf_gen_tuple_elim tys hyps) tc in
+      let pt     = { pt_head = PTHandle hd; pt_args = []; } in
+      FApi.t_seq (t_elimT_form pt f1) aux0 tc
+
+    | SFimp (_, _) -> begin
+      let id = LDecl.fresh_id hyps "_" in
+
+      match t_intros_i_seq [id] tt tc with
+      | tc when FApi.tc_done tc -> tc
+      | tc ->
+          let tc = FApi.as_tcenv1 tc in
+          let tc =
+            let rw = t_rewrite_hyp ~xconv:`AlphaEq ~mode:`Bool id (`LtoR, None)in
+            (    FApi.t_try (t_absurd_hyp ~conv:`AlphaEq ~id)
+              @! FApi.t_try (FApi.t_seq (FApi.t_try rw) tt)
+              @! t_generalize_hyp ~clear:`Yes id) tc
+          in
+
+          let iffail tc =
+            t_intros_i_seq [id]
+              (FApi.t_seqs
+                 [ts id; entry;
+                  t_generalize_hyp ~clear:`Yes ~missing:true id])
+              tc
+          in
+
+          let elims  = PGInternals.pg_cnj_elims in
+          let reduce = if delta then `Full else `NoDelta in
+
+          FApi.t_onall
+            (FApi.t_switch ~on:`All (t_elim_r ~reduce elims) ~ifok:aux0 ~iffail)
+            tc
+    end
+
+    | _ ->
+       let thesplit = t_split ~closeonly:false ~reduce:`Full in
+       let tc =
+         match FApi.t_try_base (FApi.t_seq thesplit aux0) tc with
+         | `Success tc -> tc
+         | `Failure _  ->
+            FApi.t_try
+              (FApi.t_ors [t_assumption `Conv;
+                           t_absurd_hyp ~conv:`Conv;
+                           t_false ~conv:`Conv])
+              tc in
+       let pr = proofenv_of_proof (proof_of_tcenv tc) in
+       let cl = List.map (FApi.get_pregoal_by_id^~ pr) (FApi.tc_opened tc) in
+       let nl = List.length cl in
+
+       match cl with [] | [_] -> tc | _ ->
+       
+       let cl = f_ands (List.map (fun g -> g.g_concl) cl) in
+       let tc, hd = FApi.newgoal tc ~hyps cl in
+       let pt = { pt_head = PTHandle hd; pt_args = []; } in
+
+       FApi.t_on1 nl t_id
+         ~ttout:(FApi.t_seqs [t_cutdef pt cl; aux0; t_abort])
+         tc
+
+  in FApi.t_seq entry (t_simplify_with_info EcReduction.nodelta) tc
+
+(* -------------------------------------------------------------------- *)
 let t_logic_trivial (tc : tcenv1) =
   let seqs = [
     FApi.t_try (t_assumption `Conv);
     t_progress t_id;
     FApi.t_try (t_assumption `Conv);
-    FApi.t_try (t_absurd_hyp ~conv:`Eq);
+    FApi.t_try (t_absurd_hyp ~conv:`AlphaEq);
     t_fail;
   ]
 
   in FApi.t_internal (FApi.t_try (FApi.t_seqs seqs)) tc
 
 (* -------------------------------------------------------------------- *)
-let t_trivial (ott : FApi.backward option) (tc : tcenv1) =
+let t_trivial ?(subtc : FApi.backward option) (tc : tcenv1) =
   let tryassum  = FApi.t_try (t_assumption `Conv) in
   let tprogress = t_progress t_id in
-  let subtc     = ott |> odfl t_id in
-  let seqs      = [tryassum; tprogress; tryassum; subtc; t_logic_trivial; t_fail] in
+  let subtc     = subtc |> odfl t_id in
+  let seqs      =
+    [tryassum; tprogress; tryassum; subtc; t_logic_trivial; t_fail] in
 
   FApi.t_internal (FApi.t_try (FApi.t_seqs seqs)) tc
 
@@ -1524,8 +1993,7 @@ let t_congr (f1, f2) (args, ty) tc =
   doit (List.rev args) ty tc
 
 (* -------------------------------------------------------------------- *)
-type smtmode    = [`Standard | `Strict | `Report of EcLocation.t option]
-type smtversion = [`Lazy | `Full]
+type smtmode = [`Standard | `Strict | `Report of EcLocation.t option]
 
 (* -------------------------------------------------------------------- *)
 let t_smt ~(mode:smtmode) pi tc =
@@ -1542,28 +2010,9 @@ let t_smt ~(mode:smtmode) pi tc =
         t_admit tc
   in
 
-  match pi.EcProvers.pr_version with
-  | `Full -> begin
-      let (_, concl) as goal = FApi.tc1_flat tc in
-    
-      match concl.f_node with
-      | FequivF   _  | FequivS   _
-      | FhoareF   _  | FhoareS   _
-      | FbdHoareF _  | FbdHoareS _ -> error ()
-    
-      | _ ->
-          try
-            if EcEnv.check_goal pi goal then
-              FApi.xmutate1 tc `Smt []
-            else error ()
-          with EcWhy3.CannotTranslate _ ->
-            error ()
-  end
+  let env, hyps, concl = FApi.tc1_eflat tc in
+  let notify = (fun lvl (lazy s) -> EcEnv.notify env lvl "%s" s) in
 
-  | `Lazy ->
-      let env, hyps, concl = FApi.tc1_eflat tc in
-      let notify = (fun lvl (lazy s) -> EcEnv.notify env lvl "%s" s) in
-
-      if   EcSmt.check ~notify pi hyps concl
-      then FApi.xmutate1 tc `Smt []
-      else error ()
+  if   EcSmt.check ~notify pi hyps concl
+  then FApi.xmutate1 tc `Smt []
+  else error ()

@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -41,23 +43,18 @@ end
 (* -------------------------------------------------------------------- *)
 module CI_Int = struct
   let i_Int = "Int"
-  let p_Int = EcPath.pqname p_top i_Int 
+  let p_Int = EcPath.pqname p_top i_Int
   let p_int = _Pervasive "int"
 
   let _Int = fun x -> EcPath.pqname p_Int x
 
-  let p_int_elim =
-    List.fold_left EcPath.pqname p_Int ["Induction"; "induction"]
-
+  let p_int_elim = _Int "intind"
   let p_int_opp = _Int "[-]"
   let p_int_add = _Int "+"
-  let p_int_sub = _Int "-"
   let p_int_mul = _Int "*"
   let p_int_pow = _Int "^"
   let p_int_le  = _Int "<="
   let p_int_lt  = _Int "<"
-  let p_int_ge  = _Int ">="
-  let p_int_gt  = _Int ">"
 end
 
 (* -------------------------------------------------------------------- *)
@@ -66,21 +63,22 @@ module CI_Real = struct
   let p_Real = EcPath.pqname p_top i_Real
   let p_real = _Pervasive "real"
 
+  let p_RealOrder =
+    EcPath.extend p_top ["StdOrder"; "RealOrder"]
+
   let _Real = fun x -> EcPath.pqname p_Real x
 
+  let p_real0       = _Real "zero"
+  let p_real1       = _Real "one"
   let p_real_opp    = _Real "[-]"
   let p_real_add    = _Real "+"
-  let p_real_sub    = _Real "-"
   let p_real_mul    = _Real "*"
   let p_real_inv    = _Real "inv"
-  let p_real_div    = _Real "/"
-  let p_real_pow    = List.fold_left EcPath.pqname p_Real ["PowerInt"; "^"]
+  let p_real_pow    = EcPath.extend p_Real ["^"]
   let p_real_le     = _Real "<="
   let p_real_lt     = _Real "<"
-  let p_real_ge     = _Real ">="
-  let p_real_gt     = _Real ">"
-  let p_rle_ge_sym  = _Real "le_ge_sym"
-  let p_real_of_int = List.fold_left EcPath.pqname p_Real ["FromInt"; "from_int"]
+  let p_real_of_int = EcPath.extend p_Real ["from_int"]
+  let p_real_abs    = EcPath.extend p_Real ["`|_|"]
 end
 
 (* -------------------------------------------------------------------- *)
@@ -91,29 +89,14 @@ module CI_Distr = struct
 
   let _Distr   = fun x -> EcPath.pqname p_Distr x
 
-  let p_dbool = List.fold_left EcPath.pqname CI_Bool.p_Bool ["Dbool"; "dbool"]
+  let p_dbool = List.fold_left EcPath.pqname p_top ["DBool"; "dbool"]
   let p_dbitstring = List.fold_left EcPath.pqname p_Distr ["Dbitstring"; "dbitstring"]
-  let p_dinter     = List.fold_left EcPath.pqname p_Distr ["Dinter"; "dinter"]
+  let p_dinter     = List.fold_left EcPath.pqname p_top ["DInterval"; "dinter"]
 
   let p_in_supp = _Distr "in_supp"
   let p_mu      = _Pervasive "mu"
   let p_mu_x    = _Distr "mu_x"
   let p_weight  = _Distr "weight"
-end
-
-(* -------------------------------------------------------------------- *)
-module CI_FSet = struct
-  let p_FSet = EcPath.pqname p_top "FSet"
-  let p_fset = EcPath.pqname p_FSet "set"
-end
-
-(* -------------------------------------------------------------------- *)
-module CI_Sum = struct
-  let p_Sum = EcPath.pqname p_top "Sum"
-  let _Sum  = fun x -> EcPath.pqname p_Sum x
-
-  let p_int_intval = _Sum "intval"
-  let p_int_sum    = _Sum "int_sum"
 end
 
 (* -------------------------------------------------------------------- *)
@@ -147,6 +130,7 @@ module CI_Logic = struct
   let p_if_intro      = _Logic "ifI"
   let p_eq_refl       = _Logic "eq_refl"
   let p_eq_trans      = _Logic "eq_trans"
+  let p_eq_iff        = _Logic "eq_iff"
   let p_fcongr        = _Logic "congr1"
   let p_eq_sym        = _Logic "eq_sym"
   let p_eq_sym_imp    = _Logic "eq_sym_imp"
@@ -164,6 +148,8 @@ module CI_Logic = struct
   let p_iff_rl        = _Logic "iffRL"
 
   let p_case_eq_bool  = _Logic "bool_case_eq"
+
+  let p_ip_dup        = _Logic "_ip_dup"
 end
 
 (* -------------------------------------------------------------------- *)
@@ -175,7 +161,7 @@ let s_abs  = "`|_|"
 
 (* -------------------------------------------------------------------- *)
 let is_mixfix_op =
-  let ops = [s_get; s_set; s_nil; s_cons; s_abs] in
+  let ops = [s_get; s_set; s_nil; s_abs] in
   fun op -> List.mem op ops
 
 (* -------------------------------------------------------------------- *)

@@ -23,7 +23,7 @@ module type LDDH_ORACLES = {
   fun getTriple() : gtriple option
 }.
 
-module type LDDH_DISTINGUISHER(S:LDDH_ORACLES) = { 
+module type LDDH_DISTINGUISHER(S:LDDH_ORACLES) = {
   fun distinguish() : bool {S.getTriple}
 }.
 
@@ -88,7 +88,7 @@ module LDDH_random(A : LDDH_DISTINGUISHER) = {
     O.c = 0;
     b  = AD.distinguish();
     return b;
-  }  
+  }
 }.
 
 (* ----------------------------------------------------------------------*)
@@ -120,14 +120,14 @@ module LDDH_Hyb(A : LDDH_DISTINGUISHER) = {
 
   module O = LDDH_Hyb_O
   module AD = A(O)
-  
+
   fun main(ia : int) : bool = {
     var b : bool;
     O.i = ia;
     O.c = 0;
     b  = AD.distinguish();
     return b;
-  }  
+  }
 }.
 
 lemma Eq_LDDH_Hybrid0_real:
@@ -135,7 +135,7 @@ lemma Eq_LDDH_Hybrid0_real:
     equiv [ LDDH_Hyb(A).main ~ LDDH_real(A).main :
             ={glob A} /\ ia{1} = 0 ==> res{1} = res{2} ].
 proof strict.
-  intros A.
+  move=> A.
   fun.
   call (_ :    LDDH_Hyb.O.i{1} = 0 /\ LDDH_Hyb.O.c{1} = LDDH_real.O.c{2}
             /\ LDDH_Hyb.O.c{1} >= 0).
@@ -147,7 +147,7 @@ proof strict.
     if.
       smt.
       rcondf {1} 1.
-      intros &m; intros; skip; smt.
+      move=> &m; move=> ; skip; smt.
       wp. rnd; skip; smt.
     skip; smt.
   wp; skip; smt.
@@ -158,7 +158,7 @@ lemma DDH1_Hybridk:
     equiv [ LDDH_Hyb(A).main ~ LDDH_random(A).main :
             ={glob A} /\ ia{1} = q_t ==> res{1} = res{2} ].
 proof strict.
-  intros A.
+  move=> A.
   fun.
   call (_ : LDDH_Hyb.O.i{1} = q_t /\ LDDH_Hyb.O.c{1} = LDDH_random.O.c{2}).
     fun.
@@ -167,7 +167,7 @@ proof strict.
     if.
       smt.
       rcondt {1} 1.
-      intros &m; intros; skip; smt.
+      move=> &m; move=> ; skip; smt.
       wp.
       rnd; skip; smt.
     skip; smt.
@@ -255,7 +255,7 @@ lemma Eq_Hyb_Hyb2:
     equiv [ LDDH_Hyb(A).main ~ LDDH_Hyb2(LRO_real, A).main :
             ={glob A, ia} ==> res{1} = res{2} ].
 proof strict.
-  intros=> A.
+  move=> A.
   fun.
   inline LRO_real.init.
   seq 2 3 : (   ={glob A} /\ LDDH_Hyb.O.i{1} = LDDH_Hyb2.O.i{2}
@@ -286,12 +286,12 @@ proof strict.
       wp. skip; progress => //. smt.
       wp.
       rcondt {2} 1.
-        intros=> &m. skip. intros &hr. progress. smt.
+        move=> &m. skip. move=> &hr. progress. smt.
         wp. rnd. skip; progress. trivial. smt. smt.
       rnd. skip. progress. smt. smt.
 qed.
 
-(* INCOMPLETE 
+(* INCOMPLETE
 
 (******************************************************************)
 (** We show that for the real DH oracle, LDDH_Hyb2 can be expressed

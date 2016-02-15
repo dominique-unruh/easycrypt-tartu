@@ -1,19 +1,24 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
 open EcUtils
+open EcTypes
 open EcCoreFol
 
-module Sp = EcPath.Sp
-module TC = EcTypeClass
-module BI = EcBigInt
+module Sp   = EcPath.Sp
+module TC   = EcTypeClass
+module BI   = EcBigInt
+module Ssym = EcSymbols.Ssym
 
 (* -------------------------------------------------------------------- *)
 type ty_param  = EcIdent.t * EcPath.Sp.t
 type ty_params = ty_param list
+type ty_pctor  = [ `Int of int | `Named of ty_params ]
 
 type tydecl = {
   tyd_params : ty_params;
@@ -46,11 +51,32 @@ let tydecl_as_record (td : tydecl) =
   match td.tyd_type with `Record x -> x | _ -> assert false
 
 (* -------------------------------------------------------------------- *)
-type locals = EcIdent.t list 
+let abs_tydecl ?(tc = Sp.empty) ?(params = `Int 0) () =
+  let params =
+    match params with
+    | `Named params ->
+        params
+    | `Int n ->
+        let fmt = fun x -> Printf.sprintf "'%s" x in
+        List.map
+          (fun x -> (EcIdent.create x, Sp.empty))
+          (EcUid.NameGen.bulk ~fmt n)
+  in
+
+  { tyd_params = params; tyd_type = `Abstract tc; }
+
+(* -------------------------------------------------------------------- *)
+let ty_instanciate (params : ty_params) (args : ty list) (ty : ty) =
+  let subst = EcTypes.Tvar.init (List.map fst params) args in
+  EcTypes.Tvar.subst subst ty
+
+(* -------------------------------------------------------------------- *)
+type locals = EcIdent.t list
 
 type operator_kind =
   | OB_oper of opbody option
-  | OB_pred of EcCoreFol.form option
+  | OB_pred of prbody option
+  | OB_nott of notation
 
 and opbody =
   | OP_Plain  of EcTypes.expr
@@ -59,6 +85,10 @@ and opbody =
   | OP_Proj   of EcPath.path * int * int
   | OP_Fix    of opfix
   | OP_TC
+
+and prbody =
+  | PR_Plain of form
+  | PR_Ind   of prind
 
 and opfix = {
   opf_args     : (EcIdent.t * EcTypes.ty) list;
@@ -76,31 +106,51 @@ and opbranch = {
   opb_sub  : opbranches;
 }
 
+and notation = {
+  ont_args  : (EcIdent.t * EcTypes.ty) list;
+  ont_resty : EcTypes.ty;
+  ont_body  : expr;
+  ont_ponly : bool;
+}
+
+and prind = {
+  pri_args  : (EcIdent.t * EcTypes.ty) list;
+  pri_ctors : prctor list;
+}
+
+and prctor = {
+  prc_ctor : EcSymbols.symbol;
+  prc_bds  : (EcIdent.t * gty) list;
+  prc_spec : form list;
+}
+
 type operator = {
   op_tparams : ty_params;
-  op_ty      : EcTypes.ty;        
+  op_ty      : EcTypes.ty;
   op_kind    : operator_kind;
 }
 
 (* -------------------------------------------------------------------- *)
-type axiom_kind = [`Axiom | `Lemma]
+type axiom_kind = [`Axiom of (Ssym.t * bool) | `Lemma]
 
 type axiom = {
   ax_tparams : ty_params;
-  ax_spec    : EcCoreFol.form option;
+  ax_spec    : EcCoreFol.form;
   ax_kind    : axiom_kind;
-  ax_nosmt   : bool;
-}
+  ax_nosmt   : bool; }
+
+let is_axiom (x : axiom_kind) = match x with `Axiom _ -> true | _ -> false
+let is_lemma (x : axiom_kind) = match x with `Lemma   -> true | _ -> false
 
 (* -------------------------------------------------------------------- *)
 let op_ty op = op.op_ty
 
-let is_oper op = 
+let is_oper op =
   match op.op_kind with
   | OB_oper _ -> true
   | _ -> false
 
-let is_pred op = 
+let is_pred op =
   match op.op_kind with
   | OB_pred _ -> true
   | _ -> false
@@ -114,7 +164,7 @@ let is_proj op =
   match op.op_kind with
   | OB_oper (Some (OP_Proj _)) -> true
   | _ -> false
- 
+
 let is_rcrd op =
   match op.op_kind with
   | OB_oper (Some (OP_Record _)) -> true
@@ -123,6 +173,16 @@ let is_rcrd op =
 let is_fix op =
   match op.op_kind with
   | OB_oper (Some (OP_Fix _)) -> true
+  | _ -> false
+
+let is_abbrev op =
+  match op.op_kind with
+  | OB_nott _ -> true
+  | _ -> false
+
+let is_prind op =
+  match op.op_kind with
+  | OB_pred (Some (PR_Ind _)) -> true
   | _ -> false
 
 let gen_op tparams ty kind = {
@@ -135,9 +195,19 @@ let mk_pred tparams dom body =
   let kind = OB_pred body in
     gen_op tparams (EcTypes.toarrow dom EcTypes.tbool) kind
 
-let mk_op tparams ty body = 
+let mk_op tparams ty body =
   let kind = OB_oper body in
     gen_op tparams ty kind
+
+let mk_abbrev ?(ponly = false) tparams xs (codom, body) =
+  let kind = {
+    ont_args  = xs;
+    ont_resty = codom;
+    ont_body  = body;
+    ont_ponly = ponly;
+  } in
+
+  gen_op tparams (EcTypes.toarrow (List.map snd xs) codom) (OB_nott kind)
 
 let operator_as_ctor (op : operator) =
   match op.op_kind with
@@ -157,6 +227,11 @@ let operator_as_rcrd (op : operator) =
 let operator_as_fix (op : operator) =
   match op.op_kind with
   | OB_oper (Some (OP_Fix fix)) -> fix
+  | _ -> assert false
+
+let operator_as_prind (op : operator) =
+  match op.op_kind with
+  | OB_pred (Some (PR_Ind pri)) -> pri
   | _ -> assert false
 
 (* -------------------------------------------------------------------- *)
@@ -186,8 +261,8 @@ let axiomatized_op ?(nargs = 0) ?(nosmt = false) path (tparams, bd) =
   let axspec = f_forall args (f_eq op axbd) in
 
   { ax_tparams = axpm;
-    ax_spec    = Some axspec;
-    ax_kind    = `Axiom;
+    ax_spec    = axspec;
+    ax_kind    = `Axiom (Ssym.empty, false);
     ax_nosmt   = nosmt; }
 
 (* -------------------------------------------------------------------- *)
@@ -209,7 +284,7 @@ type ring = {
   r_zero  : EcPath.path;
   r_one   : EcPath.path;
   r_add   : EcPath.path;
-  r_opp   : EcPath.path option; 
+  r_opp   : EcPath.path option;
   r_mul   : EcPath.path;
   r_exp   : EcPath.path option;
   r_sub   : EcPath.path option;
@@ -228,7 +303,7 @@ let kind_equal k1 k2 =
 
   | _, _ -> false
 
-let ring_equal r1 r2 = 
+let ring_equal r1 r2 =
      EcTypes.ty_equal r1.r_type r2.r_type
   && EcPath.p_equal r1.r_zero r2.r_zero
   && EcPath.p_equal r1.r_one  r2.r_one
@@ -244,14 +319,14 @@ let ring_equal r1 r2 =
     | `Default , `Default  -> true
     | _        , _         -> false
 
-  
+
 type field = {
   f_ring : ring;
   f_inv  : EcPath.path;
   f_div  : EcPath.path option;
 }
 
-let field_equal f1 f2 = 
+let field_equal f1 f2 =
      ring_equal f1.f_ring f2.f_ring
   && EcPath.p_equal f1.f_inv f2.f_inv
   && EcUtils.oall2 EcPath.p_equal f1.f_div f2.f_div

@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -49,6 +51,7 @@ type form = private {
 and f_node =
   | Fquant  of quantif * bindings * form
   | Fif     of form * form * form
+  | Fmatch  of form * form list * ty
   | Flet    of lpattern * form * form
   | Fint    of zint
   | Flocal  of EcIdent.t
@@ -253,7 +256,6 @@ val f_eqs : form list -> form list -> form
 (* soft-constructors - integers *)
 val fop_int_opp : form
 val fop_int_add : form
-val fop_int_sub : form
 val fop_int_opp : form
 val fop_int_pow : form
 
@@ -273,6 +275,7 @@ module FSmart : sig
   type a_pvar   = prog_var * ty * memory
   type a_quant  = quantif * bindings * form
   type a_if     = form tuple3
+  type a_match  = form * form list * ty
   type a_let    = lpattern * form * form
   type a_op     = path * ty list * ty
   type a_tuple  = form list
@@ -284,6 +287,7 @@ module FSmart : sig
   val f_pvar     : (form * a_pvar   ) -> a_pvar    -> form
   val f_quant    : (form * a_quant  ) -> a_quant   -> form
   val f_if       : (form * a_if     ) -> a_if      -> form
+  val f_match    : (form * a_match  ) -> a_match   -> form
   val f_let      : (form * a_let    ) -> a_let     -> form
   val f_op       : (form * a_op     ) -> a_op      -> form
   val f_tuple    : (form * a_tuple  ) -> a_tuple   -> form
@@ -306,7 +310,16 @@ exception DestrError of string
 val destr_error : string -> 'a
 
 (* -------------------------------------------------------------------- *)
+val destr_app1 : name:string -> (path -> bool) -> form -> form
+val destr_app2 : name:string -> (path -> bool) -> form -> form * form
+
+val destr_app1_eq : name:string -> path -> form -> form
+val destr_app2_eq : name:string -> path -> form -> form * form
+
+val destr_op        : form -> EcPath.path * ty list
 val destr_local     : form -> EcIdent.t
+val destr_pvar      : form -> prog_var * memory
+val destr_proj      : form -> form * int
 val destr_tuple     : form -> form list
 val destr_app       : form -> form * form list
 val destr_not       : form -> form
@@ -353,7 +366,10 @@ val is_forall    : form -> bool
 val is_exists    : form -> bool
 val is_let       : form -> bool
 val is_eq        : form -> bool
+val is_op        : form -> bool
 val is_local     : form -> bool
+val is_pvar      : form -> bool
+val is_proj      : form -> bool
 val is_equivF    : form -> bool
 val is_equivS    : form -> bool
 val is_eagerF    : form -> bool
@@ -403,6 +419,7 @@ module Fsubst : sig
   val f_subst_mem   : EcIdent.t -> EcIdent.t -> form -> form
   val f_subst_mod   : EcIdent.t -> mpath -> form -> form
 
+  val uni_subst : (EcUid.uid -> ty option) -> f_subst
   val uni : (EcUid.uid -> ty option) -> form -> form
   val subst_tvar : EcTypes.ty EcIdent.Mid.t -> form -> form
 

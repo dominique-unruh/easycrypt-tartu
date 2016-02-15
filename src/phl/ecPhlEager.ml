@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -31,7 +33,7 @@ let pf_destr_eqobsS pf env f =
 
 (* -------------------------------------------------------------------- *)
 let pf_hSS pf hyps h =
-  let tH = LDecl.lookup_hyp_by_id h hyps in
+  let tH = LDecl.hyp_by_id h hyps in
   (tH, pf_destr_eqobsS pf (LDecl.toenv hyps) tH)
 
 (* -------------------------------------------------------------------- *)
@@ -197,9 +199,9 @@ let t_eager_while_r h tc =
   let to_form eq =  Mpv2.to_form (fst eC.es_ml) (fst eC.es_mr) eq f_true in
 
   let eqI  = eC.es_pr in
-  let seqI = 
-    try 
-      Mpv2.of_form env (fst eC.es_ml) (fst eC.es_mr) eqI 
+  let seqI =
+    try
+      Mpv2.of_form env (fst eC.es_ml) (fst eC.es_mr) eqI
     with Not_found ->
       tc_error_lazy !!tc (fun fmt ->
         let ppe  = EcPrinting.PPEnv.ofenv env in
@@ -483,8 +485,8 @@ let eager pf env s s' inv eqIs eqXs c c' eqO =
         Mpv2.check_glob outf;
         let fhyps, inf = f_eager fhyps fl fr outf in
         let eqi =
-          List.fold_left2 
-            (fun eqs e1 e2 -> Mpv2.add_eqs env e1 e2 eqs) 
+          List.fold_left2
+            (fun eqs e1 e2 -> Mpv2.add_eqs env e1 e2 eqs)
             (Mpv2.union eqnm inf) argsl argsr
         in
           (fhyps, eqi)
@@ -595,21 +597,29 @@ let t_eager         = FApi.t_low2 "eager"         t_eager_r
 
 (* -------------------------------------------------------------------- *)
 let process_info info tc =
-  let hyps = FApi.tc1_hyps tc in
+  let env,hyps,_ = FApi.tc1_eflat tc in
 
   match info with
   | EcParsetree.LE_done h ->
-      (t_id tc, fst (LDecl.lookup_hyp (unloc h) hyps))
+      (t_id tc, fst (LDecl.hyp_by_name (unloc h) hyps))
 
   | EcParsetree.LE_todo (h, s1, s2, eqIs, eqXs) ->
-      let es    = tc1_as_equivS tc in
-      let eqIs  = TTC.tc1_process_prhl_formula tc eqIs in
-      let eqXs  = TTC.tc1_process_prhl_formula tc eqXs in
-      let s1    = TTC.tc1_process_prhl_stmt tc `Left  s1 in
-      let s2    = TTC.tc1_process_prhl_stmt tc `Right s2 in
-      let f     = f_equivS es.es_ml es.es_mr eqIs s1 s2 eqXs in
-      let h     = LDecl.fresh_id hyps (unloc h) in
-      (FApi.t_last (t_intros_i [h]) (t_cut f tc), h)
+    let ml,mr =
+      match (FApi.tc1_goal tc).f_node with
+      | FeagerF _ ->
+        EcEnv.Fun.inv_memory `Left env, EcEnv.Fun.inv_memory `Right env
+      | _ ->
+        let es    = tc1_as_equivS tc in
+        es.es_ml, es.es_mr in
+    let hyps = LDecl.push_all [ml; mr] hyps in
+    let process_formula = TTC.pf_process_form !!tc hyps tbool in
+    let eqIs  = process_formula eqIs in
+    let eqXs  = process_formula eqXs in
+    let s1    = TTC.tc1_process_stmt tc (snd ml) s1 in
+    let s2    = TTC.tc1_process_stmt tc (snd mr) s2 in
+    let f     = f_equivS ml mr eqIs s1 s2 eqXs in
+    let h     = LDecl.fresh_id hyps (unloc h) in
+    (FApi.t_last (t_intros_i [h]) (t_cut f tc), h)
 
 (* -------------------------------------------------------------------- *)
 let process_seq info (i, j) eqR tc =
@@ -666,7 +676,7 @@ let process_call info tc =
 
   FApi.t_on1seq 0
     (t_eager_call eg.eg_pr eg.eg_po)
-    (t_apply pt)
+    (EcLowGoal.Apply.t_apply_bwd_hi ~dpe:true pt)
     tc
 
 (* -------------------------------------------------------------------- *)

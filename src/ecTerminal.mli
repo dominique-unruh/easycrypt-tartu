@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -21,6 +23,6 @@ val finish      : status -> terminal -> unit
 val finalize    : terminal -> unit
 
 (* -------------------------------------------------------------------- *)
-val from_channel : name:string -> in_channel -> terminal
+val from_channel : ?gcstats:bool -> name:string -> in_channel -> terminal
 val from_tty     : unit -> terminal
 val from_emacs   : unit -> terminal

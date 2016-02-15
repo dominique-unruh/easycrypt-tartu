@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -50,6 +52,7 @@ type form = {
 and f_node =
   | Fquant  of quantif * bindings * form
   | Fif     of form * form * form
+  | Fmatch  of form * form list * ty
   | Flet    of lpattern * form * form
   | Fint    of BI.zint
   | Flocal  of EcIdent.t
@@ -311,6 +314,10 @@ module Hsform = Why3.Hashcons.Make (struct
     | Fif(b1,t1,f1), Fif(b2,t2,f2) ->
         f_equal b1 b2 && f_equal t1 t2 && f_equal f1 f2
 
+    | Fmatch(b1,es1,ty1), Fmatch(b2,es2,ty2) ->
+           List.all2 f_equal (b1::es1) (b2::es2)
+        && ty_equal ty1 ty2
+
     | Flet(lp1,e1,f1), Flet(lp2,e2,f2) ->
         lp_equal lp1 lp2 && f_equal e1 e2 && f_equal f1 f2
 
@@ -361,6 +368,11 @@ module Hsform = Why3.Hashcons.Make (struct
     | Fif(b, t, f) ->
         Why3.Hashcons.combine2 (f_hash b) (f_hash t) (f_hash f)
 
+    | Fmatch (f, fs, ty) ->
+        Why3.Hashcons.combine_list f_hash
+          (Why3.Hashcons.combine (f_hash f) (ty_hash ty))
+          fs
+
     | Flet(lp, e, f) ->
         Why3.Hashcons.combine2 (lp_hash lp) (f_hash e) (f_hash f)
 
@@ -402,15 +414,16 @@ module Hsform = Why3.Hashcons.Make (struct
     in
 
     match f with
-    | Fint _           -> Mid.empty
-    | Fop (_, tys)     -> union (fun a -> a.ty_fv) tys
-    | Fpvar (pv,m)     -> EcPath.x_fv (fv_add m Mid.empty) pv.pv_name
-    | Fglob (mp,m)     -> EcPath.m_fv (fv_add m Mid.empty) mp
-    | Flocal id        -> fv_singleton id
-    | Fapp (f, args)   -> union f_fv (f :: args)
-    | Ftuple args      -> union f_fv args
-    | Fproj(e,_)       -> f_fv e
-    | Fif (f1, f2, f3) -> union f_fv [f1; f2; f3]
+    | Fint _             -> Mid.empty
+    | Fop (_, tys)       -> union (fun a -> a.ty_fv) tys
+    | Fpvar (pv,m)       -> EcPath.x_fv (fv_add m Mid.empty) pv.pv_name
+    | Fglob (mp,m)       -> EcPath.m_fv (fv_add m Mid.empty) mp
+    | Flocal id          -> fv_singleton id
+    | Fapp (f, args)     -> union f_fv (f :: args)
+    | Ftuple args        -> union f_fv args
+    | Fproj(e, _)        -> f_fv e
+    | Fif (f1, f2, f3)   -> union f_fv [f1; f2; f3]
+    | Fmatch (b, fs, ty) -> fv_union ty.ty_fv (union f_fv (b :: fs))
 
     | Fquant(_, b, f) ->
       let do1 (id, ty) fv = fv_union (gty_fv ty) (Mid.remove id fv) in
@@ -553,6 +566,7 @@ let f_quant q b f =
 
 let f_proj   f  i  ty = mk_form (Fproj(f, i)) ty
 let f_if     f1 f2 f3 = mk_form (Fif (f1, f2, f3)) f2.f_ty
+let f_match  b  fs ty = mk_form (Fmatch (b, fs, ty)) ty
 let f_let    q  f1 f2 = mk_form (Flet (q, f1, f2)) f2.f_ty (* FIXME rename binding *)
 let f_let1   x  f1 f2 = f_let (LSymbol (x, f1.f_ty)) f1 f2
 let f_exists b  f     = f_quant Lexists b f
@@ -659,16 +673,17 @@ let f_pr pr_mem pr_fun pr_args pr_event =
 (* -------------------------------------------------------------------- *)
 let fop_int_opp = f_op EcCoreLib.CI_Int.p_int_opp [] (toarrow [tint]       tint)
 let fop_int_add = f_op EcCoreLib.CI_Int.p_int_add [] (toarrow [tint; tint] tint)
-let fop_int_sub = f_op EcCoreLib.CI_Int.p_int_sub [] (toarrow [tint; tint] tint)
 let fop_int_mul = f_op EcCoreLib.CI_Int.p_int_mul [] (toarrow [tint; tint] tint)
 let fop_int_pow = f_op EcCoreLib.CI_Int.p_int_pow [] (toarrow [tint; tint] tint)
 
 let f_int_opp f     = f_app fop_int_opp [f]      tint
 let f_int_add f1 f2 = f_app fop_int_add [f1; f2] tint
-let f_int_sub f1 f2 = f_app fop_int_sub [f1; f2] tint
 let f_int_mul f1 f2 = f_app fop_int_mul [f1; f2] tint
 let f_int_pow f1 f2 = f_app fop_int_pow [f1; f2] tint
-  
+
+let f_int_sub f1 f2 =
+  f_int_add f1 (f_int_opp f2)
+
 let rec f_int (n : BI.zint) =
   match BI.sign n with
   | s when 0 <= s -> mk_form (Fint n) tint
@@ -683,6 +698,7 @@ module FSmart = struct
   type a_pvar  = prog_var * ty * memory
   type a_quant = quantif * bindings * form
   type a_if    = form tuple3
+  type a_match = form * form list * ty
   type a_let   = lpattern * form * form
   type a_op    = EcPath.path * ty list * ty
   type a_tuple = form list
@@ -714,6 +730,11 @@ module FSmart = struct
     if   c == c' && f1 == f1' && f2 == f2'
     then fp
     else f_if c' f1' f2'
+
+  let f_match (fp, (b, fs, ty)) (b', fs', ty') =
+    if   b == b' && fs == fs' && ty == ty'
+    then fp
+    else f_match b' fs' ty'
 
   let f_let (fp, (lp, f1, f2)) (lp', f1', f2') =
     if   lp == lp' && f1 == f1' && f2 == f2'
@@ -787,6 +808,9 @@ let f_map gt g fp =
 
   | Fif (f1, f2, f3) ->
       FSmart.f_if (fp, (f1, f2, f3)) (g f1, g f2, g f3)
+
+  | Fmatch (b, fs, ty) ->
+      FSmart.f_match (fp, (b, fs, ty)) (g b, List.map g fs, gt ty)
 
   | Flet (lp, f1, f2) ->
       FSmart.f_let (fp, (lp, f1, f2)) (lp, g f1, g f2)
@@ -866,7 +890,7 @@ let f_map gt g fp =
   | Fpr pr ->
       let args' = g pr.pr_args in
       let ev'   = g pr.pr_event in
-        FSmart.f_pr (fp, pr) 
+        FSmart.f_pr (fp, pr)
           { pr with pr_args = args'; pr_event = ev'; }
 
 (* -------------------------------------------------------------------- *)
@@ -875,11 +899,12 @@ let f_iter g f =
   | Fint     _
   | Flocal   _
   | Fpvar    _
-  | Fglob    _ 
+  | Fglob    _
   | Fop      _ -> ()
 
   | Fquant   (_ , _ , f1) -> g f1
   | Fif      (f1, f2, f3) -> g f1;g f2; g f3
+  | Fmatch   (b, fs, _)   -> List.iter g (b :: fs)
   | Flet     (_, f1, f2)  -> g f1;g f2
   | Fapp     (e, es)      -> List.iter g (e :: es)
   | Ftuple   es           -> List.iter g es
@@ -900,11 +925,12 @@ let form_exists g f =
   | Fint     _
   | Flocal   _
   | Fpvar    _
-  | Fglob    _ 
+  | Fglob    _
   | Fop      _ -> false
 
   | Fquant   (_ , _ , f1) -> g f1
   | Fif      (f1, f2, f3) -> g f1 || g f2 || g f3
+  | Fmatch   (b, fs, _)   -> List.exists g (b :: fs)
   | Flet     (_, f1, f2)  -> g f1 || g f2
   | Fapp     (e, es)      -> List.exists g (e :: es)
   | Ftuple   es           -> List.exists g es
@@ -925,11 +951,12 @@ let form_forall g f =
   | Fint     _
   | Flocal   _
   | Fpvar    _
-  | Fglob    _ 
+  | Fglob    _
   | Fop      _ -> true
 
   | Fquant   (_ , _ , f1) -> g f1
   | Fif      (f1, f2, f3) -> g f1 && g f2 && g f3
+  | Fmatch   (b, fs, _)   -> List.for_all g (b :: fs)
   | Flet     (_, f1, f2)  -> g f1 && g f2
   | Fapp     (e, es)      -> List.for_all g (e :: es)
   | Ftuple   es           -> List.for_all g es
@@ -947,7 +974,7 @@ let form_forall g f =
 (* -------------------------------------------------------------------- *)
 let f_ops f =
   let aout = ref EcPath.Sp.empty in
-  let rec doit f = 
+  let rec doit f =
     match f.f_node with
     | Fop (p, _) -> aout := Sp.add p !aout
     | _ -> f_iter doit f
@@ -994,7 +1021,7 @@ let destr_exists f =
   | Fquant(Lexists,bd,p) -> bd, p
   | _ -> destr_error "exists"
 
-let destr_let f = 
+let destr_let f =
   match f.f_node with
   | Flet(lp, e1,e2) -> lp,e1,e2
   | _ -> destr_error "let"
@@ -1077,29 +1104,49 @@ let is_op_iff      p = EcPath.p_equal EcCoreLib.CI_Bool.p_iff p
 let is_op_eq       p = EcPath.p_equal EcCoreLib.CI_Bool.p_eq  p
 
 (* -------------------------------------------------------------------- *)
-let destr_app   = function { f_node = Fapp (f, fs) } -> (f, fs) | f -> (f, [])
-let destr_tuple = function { f_node = Ftuple fs } -> fs | _ -> destr_error "tuple"
-let destr_local = function { f_node = Flocal id } -> id | _ -> destr_error "local"
+let destr_op = function
+  { f_node = Fop (op, tys) } -> op, tys | _ -> destr_error "op"
 
-let _destr1 ~name pred form =
+let destr_app = function
+  { f_node = Fapp (f, fs) } -> (f, fs) | f -> (f, [])
+
+let destr_op_app f =
+  let (fo, args) = destr_app f in destr_op fo, args
+
+let destr_tuple = function
+  { f_node = Ftuple fs } -> fs | _ -> destr_error "tuple"
+
+let destr_local = function
+  { f_node = Flocal id } -> id | _ -> destr_error "local"
+
+let destr_pvar = function
+  { f_node = Fpvar (pv, m) } -> (pv, m) | _ -> destr_error "pvar"
+
+let destr_proj  = function
+  { f_node = Fproj (f, i) } -> (f, i) | _ -> destr_error "proj"
+
+let destr_app1 ~name pred form =
   match destr_app form with
   | { f_node = Fop (p, _) }, [f] when pred p -> f
   | _ -> destr_error name
 
-let _destr2 ~name pred form =
+let destr_app2 ~name pred form =
   match destr_app form with
   | { f_node = Fop (p, _) }, [f1; f2] when pred p -> (f1, f2)
   | _ -> destr_error name
 
-let destr_not = _destr1 ~name:"not" is_op_not
-let destr_and = _destr2 ~name:"and" is_op_and_any
-let destr_or  = _destr2 ~name:"or"  is_op_or_any
-let destr_imp = _destr2 ~name:"imp" is_op_imp
-let destr_iff = _destr2 ~name:"iff" is_op_iff
-let destr_eq  = _destr2 ~name:"eq"  is_op_eq
+let destr_app1_eq ~name p f = destr_app1 ~name (EcPath.p_equal p) f
+let destr_app2_eq ~name p f = destr_app2 ~name (EcPath.p_equal p) f
 
-let destr_eq_or_iff = 
-  _destr2 ~name:"eq-or-iff" (fun p -> is_op_eq p || is_op_iff p)
+let destr_not = destr_app1 ~name:"not" is_op_not
+let destr_and = destr_app2 ~name:"and" is_op_and_any
+let destr_or  = destr_app2 ~name:"or"  is_op_or_any
+let destr_imp = destr_app2 ~name:"imp" is_op_imp
+let destr_iff = destr_app2 ~name:"iff" is_op_iff
+let destr_eq  = destr_app2 ~name:"eq"  is_op_eq
+
+let destr_eq_or_iff =
+  destr_app2 ~name:"eq-or-iff" (fun p -> is_op_eq p || is_op_iff p)
 
 let destr_or_r form =
   match destr_app form with
@@ -1114,7 +1161,7 @@ let destr_and_r form =
   | _ -> destr_error "and"
 
 let destr_nots form =
-  let rec aux b form = 
+  let rec aux b form =
     match try Some (destr_not form) with DestrError _ -> None with
     | None      -> (b, form)
     | Some form -> aux (not b) form
@@ -1127,7 +1174,10 @@ let is_from_destr dt f =
 let is_true      f = f_equal f f_true
 let is_false     f = f_equal f f_false
 let is_tuple     f = is_from_destr destr_tuple     f
+let is_op        f = is_from_destr destr_op        f
 let is_local     f = is_from_destr destr_local     f
+let is_pvar      f = is_from_destr destr_pvar      f
+let is_proj      f = is_from_destr destr_proj      f
 let is_and       f = is_from_destr destr_and       f
 let is_or        f = is_from_destr destr_or        f
 let is_not       f = is_from_destr destr_not       f
@@ -1148,20 +1198,54 @@ let is_pr        f = is_from_destr destr_pr        f
 let is_eq_or_iff f = (is_eq f) || (is_iff f)
 
 (* -------------------------------------------------------------------- *)
-let rec form_of_expr mem (e: expr) =
+let quantif_of_equantif (qt : equantif) =
+  match qt with
+  | `ELambda -> Llambda
+  | `EForall -> Lforall
+  | `EExists -> Lexists
+
+(* -------------------------------------------------------------------- *)
+let rec form_of_expr mem (e : expr) =
   match e.e_node with
-  | Eint n -> f_int n
-  | Elocal id -> f_local id e.e_ty
-  | Evar pv -> f_pvar pv e.e_ty mem
-  | Eop (op,tys) -> f_op op tys e.e_ty
-  | Eapp (ef,es) -> f_app (form_of_expr mem ef) (List.map (form_of_expr mem) es) e.e_ty
-  | Elet (lpt,e1,e2) -> f_let lpt (form_of_expr mem e1) (form_of_expr mem e2)
-  | Etuple es -> f_tuple (List.map (form_of_expr mem) es)
-  | Eproj(e1,i) -> f_proj (form_of_expr mem e1) i e.e_ty
-  | Eif (e1,e2,e3) ->
-      f_if (form_of_expr mem e1) (form_of_expr mem e2) (form_of_expr mem e3)
-  | Elam(b,e) ->
-    f_lambda (List.map (fun (x,ty) -> (x,GTty ty)) b) (form_of_expr mem e)
+  | Eint n ->
+     f_int n
+
+  | Elocal id ->
+     f_local id e.e_ty
+
+  | Evar pv ->
+     f_pvar pv e.e_ty mem
+
+  | Eop (op, tys) ->
+     f_op op tys e.e_ty
+
+  | Eapp (ef, es) ->
+     f_app (form_of_expr mem ef) (List.map (form_of_expr mem) es) e.e_ty
+
+  | Elet (lpt, e1, e2) ->
+     f_let lpt (form_of_expr mem e1) (form_of_expr mem e2)
+
+  | Etuple es ->
+     f_tuple (List.map (form_of_expr mem) es)
+
+  | Eproj (e1, i) ->
+     f_proj (form_of_expr mem e1) i e.e_ty
+
+  | Eif (e1, e2, e3) ->
+     let e1 = form_of_expr mem e1 in
+     let e2 = form_of_expr mem e2 in
+     let e3 = form_of_expr mem e3 in
+     f_if e1 e2 e3
+
+  | Ematch (b, fs, ty) ->
+     let b'  = form_of_expr mem b in
+     let fs' = List.map (form_of_expr mem) fs in
+     f_match b' fs' ty
+
+  | Equant (qt, b, e) ->
+     let b = List.map (fun (x, ty) -> (x, GTty ty)) b in
+     let e = form_of_expr mem e in
+     f_quant (quantif_of_equantif qt) b e
 
 (* -------------------------------------------------------------------- *)
 type f_subst = {
@@ -1489,7 +1573,7 @@ module Fsubst = struct
 
     let (sag, args, e) =
       match e.e_node with
-      | Elam (largs, lbody) when args <> [] ->
+      | Equant (`ELambda, largs, lbody) when args <> [] ->
           let largs1, largs2 = List.takedrop (List.length args  ) largs in
           let  args1,  args2 = List.takedrop (List.length largs1)  args in
             (Mid.of_list (List.combine (List.map fst largs1) args1),
@@ -1543,11 +1627,17 @@ module Fsubst = struct
     fun f -> if Mid.mem x f.f_fv then f_subst s f else f
 
   (* ------------------------------------------------------------------ *)
+  let fty_subst sty =
+    { f_subst_id with fs_sty = sty; fs_ty = ty_subst sty }
+
+  let uni_subst uidmap =
+    fty_subst { ty_subst_id with ts_u = uidmap }
+
   let mapty sty =
-    f_subst { f_subst_id with fs_sty = sty; fs_ty = ty_subst sty }
+    f_subst (fty_subst sty)
 
   let uni uidmap =
-    mapty { ty_subst_id with ts_u = uidmap }
+    f_subst (uni_subst uidmap)
 
   (* ------------------------------------------------------------------ *)
   let subst_locals s =
@@ -1563,7 +1653,8 @@ module Fsubst = struct
   (* ------------------------------------------------------------------ *)
   let init_subst_tvar s =
     let sty = { ty_subst_id with ts_v = Mid.find_opt^~ s } in
-    { f_subst_id with fs_freshen = true; fs_sty = sty; fs_ty = ty_subst sty }
+    { f_subst_id with
+        fs_freshen = true; fs_sty = sty; fs_ty = ty_subst sty }
 
   let subst_tvar s =
     f_subst (init_subst_tvar s)

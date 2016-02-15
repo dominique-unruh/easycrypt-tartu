@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -28,9 +30,9 @@ module Filename = struct
     match Sys.os_type with "Win32" -> ';' | _ -> ':'
 
   let paths_of_string s =
-    let re = String.make 1 path_sep in
-    let re = Str.regexp ((Str.quote re) ^ "+") in
-    Str.split re s
+    let rex = String.make 1 path_sep in
+    let rex = Pcre.regexp ((Pcre.quote rex) ^ "+") in
+    Pcre.split ~rex s
 end
 
 (* -------------------------------------------------------------------- *)

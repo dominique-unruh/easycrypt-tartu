@@ -7,7 +7,9 @@ EasyCrypt uses the following third-party tools/libraries:
 
      Available at http://caml.inria.fr/
 
- * Why3 (= 0.85)
+ * OCamlbuild (only for OCaml >= 4.03)
+
+ * Why3 (>= 0.85)
 
      Available at http://why3.lri.fr/
 
@@ -18,15 +20,14 @@ EasyCrypt uses the following third-party tools/libraries:
 
  * Menhir [http://gallium.inria.fr/~fpottier/menhir/]
 
- * Yojson [http://mjambon.com/yojson.html]
-
  * OCaml Batteries Included [http://batteries.forge.ocamlcore.org/]
-
+ 
+ * OCaml PCRE (>= 7) [https://github.com/mmottl/pcre-ocaml]
 
 Installing requirements using OPAM (POSIX systems - preferred)
 --------------------------------------------------------------------
 
-Starting with opam 1.2.0, you can install all the needed depdendencies
+Starting with opam 1.2.0, you can install all the needed dependencies
 via the opam OCaml packages manager.
 
   0. Optionally, switch to a dedicated compiler for EasyCrypt:
@@ -184,7 +185,8 @@ installation as follows. Otherwise, jump directly to step 5.
 
   5. Install the following wodi packages:
 
-       godi-menhir godi-yojson godi-batteries godi-ocamlgraph godi-zarith godi-zip
+       godi-menhir godi-yojson godi-batteries godi-ocamlgraph godi-zarith
+       godi-zip godi-pcre
 
      Use either the wodi32 package manager (from the start menu), or the
      CLI interface:
@@ -282,7 +284,7 @@ Installing system-wide (manual installation)
 Add the following entry to <proof-general-home>/generic/proof-site.el
 in the definition of `proof-assistant-table-default':
 
-        (easycrypt "EasyCrypt" "ec")
+        (easycrypt "EasyCrypt" "ec" ".*\\.eca?")
 
 Copy the directory easycrypt/ to <proof-general-home>/
 

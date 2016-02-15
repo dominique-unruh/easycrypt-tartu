@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -18,6 +20,7 @@ and options = {
 and cmp_option = {
   cmpo_input   : string;
   cmpo_provers : prv_options;
+  cmpo_gcstats : bool;
 }
 
 and cli_option = {
@@ -33,7 +36,6 @@ and prv_options = {
   prvo_pragmas   : string list;
   prvo_checkall  : bool;
   prvo_profile   : bool;
-  prvo_oldsmt    : bool;
   prvo_iterate   : bool;
 }
 

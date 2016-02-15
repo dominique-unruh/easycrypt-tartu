@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -16,6 +18,39 @@ open EcPV
 open EcCoreGoal
 
 module TTC = EcProofTyping
+
+(* -------------------------------------------------------------------- *)
+module IFEL : sig
+  val loaded : env -> bool
+  val felsum : form -> (form * form) -> form
+end = struct
+  open EcCoreLib
+
+  let i_Fel  = "FelTactic"
+  let p_Fel  = EcPath.pqname EcCoreLib.p_top i_Fel
+  let p_List = [i_top; "List"]
+  let p_BRA  = [i_top; "StdBigop"; "Bigreal"; "BRA"]
+
+  let tlist =
+    let tlist = EcPath.fromqsymbol (p_List, "list") in
+    fun ty -> EcTypes.tconstr tlist [ty]
+
+  let range =
+    let rg = EcPath.fromqsymbol (p_List @ ["Range"], "range") in
+    let rg = f_op rg [] (toarrow [tint; tint] (tlist tint)) in
+    fun m n -> f_app rg [m; n] (tlist tint)
+
+  let felsum =
+    let bgty = [tpred tint; tfun tint treal; tlist tint] in
+    let bg   = EcPath.fromqsymbol (p_BRA, "big") in
+    let bg   = f_op bg [tint] (toarrow bgty treal) in
+    let prT  = EcPath.fromqsymbol ([i_top; "Pred"], "predT") in
+    let prT  = f_op prT [tint] (tpred tint) in
+    fun f (m, n) -> f_app bg [prT; f; range m n] treal
+
+  let loaded (env : env) =
+    is_some (EcEnv.Theory.by_path_opt p_Fel env)
+end
 
 (* -------------------------------------------------------------------- *)
 let rec callable_oracles_f env modv os f =
@@ -121,8 +156,7 @@ let t_failure_event_r (at_pos, cntr, ash, q, f_event, pred_specs, inv) tc =
 
   (* subgoal on the bounds *)
   let bound_goal =
-    let intval = f_int_intval f_i0 (f_int_sub q f_i1) in
-    let v = f_int_sum ash intval treal in
+    let v = IFEL.felsum ash (f_i0, f_int_sub q f_i1) in
     f_real_le v bd
   in
 
@@ -194,9 +228,8 @@ let t_failure_event at_pos cntr ash q f_event pred_specs inv tc =
 let process_fel at_pos (infos : fel_info) tc =
   let env, hyps, concl = FApi.tc1_eflat tc in
 
-  if EcEnv.Theory.by_path_opt EcCoreLib.CI_Sum.p_Sum env = None then 
-    tacuerror "fel tactic cannot be used when theory Sum is not loaded";
-
+  if not (IFEL.loaded env) then
+    tacuerror "fel: load the `FelTactic' theory first";
 
   let f = match concl.f_node with
     | Fapp ({ f_node = Fop (op, _) }, [pr; _])

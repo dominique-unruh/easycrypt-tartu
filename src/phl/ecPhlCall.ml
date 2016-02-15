@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -352,16 +354,48 @@ let process_call side info tc =
   in
 
   let t_call tc =
+    let env   = FApi.tc1_env  tc in
     let concl = FApi.tc1_goal tc in
 
     match ax.f_node, concl.f_node with
-    | FhoareF hf, FhoareS _ ->
+    | FhoareF hf, FhoareS hs ->
+        let (_, f, _), _ = tc1_last_call tc hs.hs_s in
+        if not (EcEnv.NormMp.x_equal env hf.hf_f f) then
+          tc_error_lazy !!tc (fun fmt ->
+            let ppe = EcPrinting.PPEnv.ofenv env in
+              Format.fprintf fmt
+                "call cannot be used with a lemma referring to `%a': \
+                 the last statement is a call to `%a'"
+                (EcPrinting.pp_funname ppe) hf.hf_f
+                (EcPrinting.pp_funname ppe) f);
         t_hoare_call hf.hf_pr hf.hf_po tc
 
-    | FbdHoareF hf, FbdHoareS _ ->
+    | FbdHoareF hf, FbdHoareS hs ->
+        let (_, f, _), _ = tc1_last_call tc hs.bhs_s in
+        if not (EcEnv.NormMp.x_equal env hf.bhf_f f) then
+          tc_error_lazy !!tc (fun fmt ->
+            let ppe = EcPrinting.PPEnv.ofenv env in
+              Format.fprintf fmt
+                "call cannot be used with a lemma referring to `%a': \
+                 the last statement is a call to `%a'"
+                (EcPrinting.pp_funname ppe) hf.bhf_f
+                (EcPrinting.pp_funname ppe) f);
         t_bdhoare_call hf.bhf_pr hf.bhf_po None tc
 
-    | FequivF ef, FequivS _ ->
+    | FequivF ef, FequivS es ->
+        let (_, fl, _), _ = tc1_last_call tc es.es_sl in
+        let (_, fr, _), _ = tc1_last_call tc es.es_sr in
+        if not (EcEnv.NormMp.x_equal env ef.ef_fl fl) ||
+           not (EcEnv.NormMp.x_equal env ef.ef_fr fr) then
+          tc_error_lazy !!tc (fun fmt ->
+            let ppe = EcPrinting.PPEnv.ofenv env in
+              Format.fprintf fmt
+                "call cannot be used with a lemma referring to `%a/%a': \
+                 the last statement is a call to `%a/%a'"
+                (EcPrinting.pp_funname ppe) ef.ef_fl
+                (EcPrinting.pp_funname ppe) ef.ef_fr
+                (EcPrinting.pp_funname ppe) fl
+                (EcPrinting.pp_funname ppe) fr);
         t_equiv_call ef.ef_pr ef.ef_po tc
 
     | FbdHoareF hf, FequivS _ ->
@@ -372,10 +406,10 @@ let process_call side info tc =
         in
           t_equiv_call1 side hf.bhf_pr hf.bhf_po tc
 
-    | _, _ -> tc_error !!tc "invalid goal shape"
+    | _, _ -> tc_error !!tc "call: invalid goal shape"
 
   in
     FApi.t_seqsub
       t_call
-      [FApi.t_seq (t_apply pt) !subtactic; t_id]
+      [FApi.t_seq (EcLowGoal.Apply.t_apply_bwd_hi ~dpe:true pt) !subtactic; t_id]
       tc

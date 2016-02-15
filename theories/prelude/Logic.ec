@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-B licence.
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-B-V1 license
  * -------------------------------------------------------------------- *)
 
 (*** Base Logic Rules *)
@@ -39,6 +41,9 @@ lemma nosmt nnot: forall (x:bool), (!(!x)) = x by [].
 lemma nosmt negbTE: forall (x:bool), !x => (x => false) by [].
 lemma nosmt negeqF: forall (x:bool), !x => (x =  false) by [].
 
+lemma negb_inj : forall b1 b2, !b1 = !b2 => b1 = b2 by [].
+lemma iff_negb : forall b1 b2, (!b1 <=> !b2) <=> (b1 <=> b2) by [].
+
 lemma nosmt nand: forall (a b:bool), (!a) \/ (!b) <=> !(a /\ b) by [].
 lemma nosmt nor : forall (a b:bool), (!a) /\ (!b) <=> !(a \/ b) by [].
 
@@ -70,7 +75,7 @@ lemma nosmt bool_ind (P : bool -> bool):
 by [].
 
 (** and *)
-lemma nosmt andE : forall (a b c:bool), 
+lemma nosmt andE : forall (a b c:bool),
     (a => b => c) => (a /\ b) => c
 by [].
 
@@ -82,7 +87,7 @@ lemma nosmt andEr : forall (a b:bool),
     (a /\ b) => b
 by [].
 
-lemma nosmt andI : forall (a b : bool), 
+lemma nosmt andI : forall (a b : bool),
    a => b => (a /\ b)
 by [].
 
@@ -116,7 +121,7 @@ lemma andb_id2r (a b c : bool) : (b => a = c) <=> (a /\ b) = (c /\ b).
 proof. smt. qed.
 
 (** or *)
-lemma nosmt orE : forall (a b c:bool), 
+lemma nosmt orE : forall (a b c:bool),
     (a => c) => (b => c) => (a \/ b) => c
 by [].
 
@@ -226,7 +231,7 @@ lemma nosmt iffRL (a b : bool):
 by [].
 
 (** if *)
-lemma nosmt ifE : forall (a bt bf c: bool), 
+lemma nosmt ifE : forall (a bt bf c: bool),
   (a => bt => c) => (!a => bf => c)
     => (if a then bt else bf) => c
 by [].
@@ -274,7 +279,11 @@ lemma nosmt fun_if2: forall (f:'a -> 'b -> 'c) b x1 x2 x,
   f (if b then x1 else x2) x = (if b then f x1 x else f x2 x)
 by [].
 
-lemma nosmt imp   : forall (x y : bool), (x => y) <=> ((!x)\/y) by [].
+lemma nosmt if_same b (x : 'a):
+  (if b then x else x) = x
+by [].
+
+lemma nosmt imp : forall (x y : bool), (x => y) <=> ((!x)\/y) by [].
 
 lemma nosmt imp_trans (a b c : bool):
   (a => b) => (b => c) => (a => c)
@@ -283,6 +292,8 @@ by [].
 lemma iffP p q r: (r <=> q) => (p => q) => (q => p) => r <=> p
 by [].
 
+lemma nosmt _ip_dup p q : (p => p => q) => p => q by [].
+
 (** equality *)
 lemma nosmt eq_refl  : forall (x:'a), x = x by [].
 lemma nosmt eq_sym   : forall (x y : 'a), x = y <=> y = x by [].
@@ -290,76 +301,19 @@ lemma nosmt eq_trans : forall (x y z : 'a), x = y => y = z => x = z by [].
 
 lemma nosmt eq_sym_imp : forall (x y : 'a), x = y => y = x by [].
 
-(** tuples *) 
-lemma nosmt tuple2_ind : 
-  forall 
-    (p: ('a1*'a2) -> bool) 
-    (t:'a1*'a2),
-    (forall (x1:'a1) (x2:'a2), 
-       t = (x1,x2) => p (x1,x2)) => 
-    p t
-by [].
+(* -------------------------------------------------------------------- *)
+op choiceb ['a] (P : 'a -> bool) (x0 : 'a) : 'a.
 
-lemma nosmt tuple3_ind : 
-  forall 
-    (p: ('a1*'a2*'a3) -> bool) 
-    (t:'a1*'a2*'a3),
-    (forall (x1:'a1) (x2:'a2) (x3:'a3), 
-       t = (x1,x2,x3) => p (x1,x2,x3)) => 
-    p t
-by [].
+axiom choicebP ['a] (P : 'a -> bool) (x0 : 'a):
+  (exists x, P x) => P (choiceb P x0).
 
-lemma nosmt tuple4_ind : 
-  forall 
-    (p: ('a1*'a2*'a3*'a4) -> bool) 
-    (t:'a1*'a2*'a3*'a4),
-    (forall (x1:'a1) (x2:'a2) (x3:'a3) (x4:'a4), 
-       t = (x1,x2,x3,x4) => p (x1,x2,x3,x4)) => 
-    p t
-by [].
+axiom choiceb_dfl ['a] (P : 'a -> bool) (x0 : 'a):
+  (forall x, !P x) => choiceb P x0 = x0.
 
-lemma nosmt tuple5_ind : 
-  forall 
-    (p: ('a1*'a2*'a3*'a4*'a5) -> bool) 
-    (t:'a1*'a2*'a3*'a4*'a5),
-    (forall (x1:'a1) (x2:'a2) (x3:'a3) (x4:'a4) (x5:'a5), 
-       t = (x1,x2,x3,x4,x5) => p (x1,x2,x3,x4,x5)) => 
-    p t
-by [].
+axiom nosmt eq_choice ['a] (P Q : 'a -> bool) (x0 : 'a):
+  (forall x, P x <=> Q x) => choiceb P x0 = choiceb Q x0.
 
-lemma nosmt tuple6_ind : 
-  forall 
-    (p: ('a1*'a2*'a3*'a4*'a5*'a6) -> bool) 
-    (t:'a1*'a2*'a3*'a4*'a5*'a6),
-    (forall (x1:'a1) (x2:'a2) (x3:'a3) (x4:'a4) (x5:'a5) (x6:'a6), 
-       t = (x1,x2,x3,x4,x5,x6) => p (x1,x2,x3,x4,x5,x6)) => 
-    p t
-by [].
-
-lemma nosmt tuple7_ind : 
-  forall 
-    (p: ('a1*'a2*'a3*'a4*'a5*'a6*'a7) -> bool) 
-    (t:'a1*'a2*'a3*'a4*'a5*'a6*'a7),
-    (forall (x1:'a1) (x2:'a2) (x3:'a3) (x4:'a4) (x5:'a5) (x6:'a6) (x7:'a7), 
-       t = (x1,x2,x3,x4,x5,x6,x7) => p (x1,x2,x3,x4,x5,x6,x7)) => 
-    p t
-by [].
-
-lemma nosmt tuple8_ind :
-  forall 
-    (p: ('a1*'a2*'a3*'a4*'a5*'a6*'a7*'a8) -> bool) 
-    (t:'a1*'a2*'a3*'a4*'a5*'a6*'a7*'a8),
-    (forall (x1:'a1) (x2:'a2) (x3:'a3) (x4:'a4) (x5:'a5) (x6:'a6) (x7:'a7) (x8:'a8), 
-       t = (x1,x2,x3,x4,x5,x6,x7,x8) => p (x1,x2,x3,x4,x5,x6,x7,x8)) => 
-    p t
-by [].
-
-lemma nosmt tuple9_ind :
-  forall 
-    (p: ('a1*'a2*'a3*'a4*'a5*'a6*'a7*'a8*'a9) -> bool) 
-    (t:'a1*'a2*'a3*'a4*'a5*'a6*'a7*'a8*'a9),
-    (forall (x1:'a1) (x2:'a2) (x3:'a3) (x4:'a4) (x5:'a5) (x6:'a6) (x7:'a7) (x8:'a8) 
-      (x9:'a9), 
-       t = (x1,x2,x3,x4,x5,x6,x7,x8,x9) => p (x1,x2,x3,x4,x5,x6,x7,x8,x9)) => 
-    p t
-by [].
+(* -------------------------------------------------------------------- *)
+axiom nosmt funchoice ['a 'b] (P : 'a -> 'b -> bool):
+     (forall x, exists y, P x y)
+  => (exists f, forall x, P x (f x)).

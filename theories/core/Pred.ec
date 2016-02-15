@@ -1,9 +1,19 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-B licence.
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-B-V1 license
  * -------------------------------------------------------------------- *)
 
-require export ExtEq.
+(* -------------------------------------------------------------------- *)
+require export ExtEq Fun.
+
+(* -------------------------------------------------------------------- *)
+type 'a rel = 'a -> 'a -> bool.
+
+lemma pred_ext (P Q : 'a -> bool):
+  P = Q <=> forall x, P x <=> Q x.
+proof. by split=> //= h; apply/fun_ext=> x; rewrite h. qed.
 
 (*** Working with predicates *)
 (** Lifting boolean operators to predicates *)
@@ -71,7 +81,6 @@ lemma nosmt subrel_trans (r2 r1 r3 : 'a -> 'b -> bool):
 by [].
 
 (** Lemmas **)
-(* The 'P' lemmas are not useful in our case. *)
 lemma pred1E (c : 'a) : pred1 c = ((=) c).
 proof. by apply fun_ext=> x; rewrite (eq_sym c). qed.
 
@@ -84,11 +93,14 @@ by [].
 lemma eqVneq (x y : 'a) : x = y \/ x <> y
 by [].
 
+lemma predT_comp ['a 'b] (p : 'a -> 'b) : predT \o p = predT.
+proof. by []. qed.
+
 lemma predIC (p1 p2 : 'a -> bool) : predI p1 p2 = predI p2 p1.
 proof. by apply fun_ext=> x; rewrite /predI andC. qed.
 
 lemma predCpredI (p : 'a -> bool) : predI (predC p) p = pred0.
-proof. by apply fun_ext=> x /=; case (p x); delta=> ->. qed. (* delta *)
+proof. by apply/fun_ext=> x /=; case (p x); delta=> ->. qed. (* delta *)
 
 lemma predCpredU (p : 'a -> bool) : predU (predC p) p = predT.
 proof. by apply fun_ext=> x /=; case (p x); delta=> ->. qed. (* delta *)
@@ -116,3 +128,6 @@ by [].
 lemma nosmt subrelUr (r1 r2 : 'a -> 'b -> bool):
   subrel r2 (relU r1 r2)
 by [].
+
+lemma nosmt predTofV (f : 'a -> 'b): predT \o f = predT.
+proof. by apply/fun_ext=> x. qed.

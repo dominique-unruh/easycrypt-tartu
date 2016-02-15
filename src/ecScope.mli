@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -25,21 +27,24 @@ val toperror_of_exn : ?gloc:EcLocation.t -> exn -> exn
 type scope
 
 type proof_uc = {
-  puc_active : proof_auc option;
+  puc_active : (proof_auc * proof_ctxt option) option;
   puc_cont   : proof_ctxt list * (EcEnv.env option);
+  puc_init   : EcEnv.env;
 }
 
 and proof_auc = {
-  puc_name   : string;
+  puc_name   : symbol option;
   puc_mode   : bool option;
   puc_jdg    : proof_state;
   puc_flags  : pucflags;
   puc_crt    : EcDecl.axiom;
 }
 
-and proof_ctxt = (symbol * EcDecl.axiom) * EcPath.path * EcEnv.env
+and proof_ctxt =
+  (symbol option * EcDecl.axiom) * EcPath.path * EcEnv.env
 
-and proof_state = PSNoCheck | PSCheck of EcCoreGoal.proof
+and proof_state =
+  PSNoCheck | PSCheck of EcCoreGoal.proof
 
 and pucflags = {
   puc_nosmt : bool;
@@ -65,30 +70,38 @@ type topmode = [`InProof | `InActiveProof | `InTop]
 val check_state : topmode -> string -> scope -> unit
 
 (* -------------------------------------------------------------------- *)
+val dump_why3 : scope -> string -> unit
+
+(* -------------------------------------------------------------------- *)
+exception UnknownFlag of string
+
 module Options : sig
+  val set : scope -> string -> bool -> scope
+  val get : scope -> string -> bool
+
   val set_implicits : scope -> bool -> scope
   val get_implicits : scope -> bool
 end
 
 (* -------------------------------------------------------------------- *)
 module Op : sig
-  val add : scope -> poperator located -> scope
-  val add_choiceop : scope -> pchoice located -> scope
+  val add : scope -> poperator located -> EcDecl.operator * scope
 end
 
 (* -------------------------------------------------------------------- *)
 module Pred : sig
-  val add : scope -> ppredicate located -> scope
+  val add : scope -> ppredicate located -> EcDecl.operator * scope
 end
 
 (* -------------------------------------------------------------------- *)
 module Ax : sig
   type mode = [`WeakCheck | `Check | `Report]
 
-  val add  : scope -> mode -> paxiom located -> string option * scope
-  val save : scope -> EcLocation.t -> string option * scope
-
-  val activate : scope -> EcParsetree.pqsymbol -> scope
+  val add     : scope -> mode -> paxiom located -> symbol option * scope
+  val save    : scope -> string option * scope
+  val admit   : scope -> string option * scope
+  val abort   : scope -> scope
+  val realize : scope -> mode -> prealize located -> symbol option * scope
 end
 
 (* -------------------------------------------------------------------- *)
@@ -126,7 +139,10 @@ module Theory : sig
 
   (* [exit scope] close and finalize the top-most theory and returns
    * its name. Raises [TopScope] if [scope] has not super scope. *)
-  val exit  : scope -> symbol * scope
+  val exit :
+       ?pempty:[`ClearOnly | `Full | `No]
+    -> ?clears:(pqsymbol option) list
+    -> scope -> symbol * scope
 
   (* [import scope name] find and import theory [name] in scope
    * [scope]. Raise [LookupFailure] if theory [name] cannot be
@@ -144,8 +160,7 @@ module Theory : sig
    * theory. *)
   val require : scope -> (symbol * thmode) -> (scope -> scope) -> scope
 
-  (* FIXME: DOC *)
-  val import_w3 : scope -> string list -> string -> w3_renaming list -> scope
+  val add_clears : (pqsymbol option) list -> scope -> scope
 end
 
 (* -------------------------------------------------------------------- *)
@@ -156,7 +171,11 @@ end
 
 (* -------------------------------------------------------------------- *)
 module Tactics : sig
-  val process : scope -> Ax.mode -> ptactic list -> scope
+  open EcCoreGoal
+
+  type prinfos = proofenv * (handle * handle list)
+
+  val process : scope -> Ax.mode -> ptactic list -> prinfos option * scope
   val proof   : scope -> Ax.mode -> bool -> scope
 end
 
@@ -168,26 +187,33 @@ module Prover : sig
     po_nprovers   : int option;
     po_provers    : string list option * (include_exclude * string) list;
     po_verbose    : int option;
-    po_version    : [`Lazy | `Full] option;
     pl_all        : bool option;
     pl_max        : int option;
     pl_iterate    : bool option;
     pl_wanted     : EcProvers.hints option;
     pl_unwanted   : EcProvers.hints option;
   }
- val empty_options : smt_options
 
-  val process     : scope -> pprover_infos -> scope 
+  val empty_options : smt_options
+
+  val process     : scope -> pprover_infos -> scope
   val set_wrapper : scope -> string option -> scope
 
-  val set_default : scope -> smt_options -> scope 
+  val set_default : scope -> smt_options -> scope
   val full_check  : scope -> scope
   val check_proof : scope -> bool -> scope
 end
 
 (* -------------------------------------------------------------------- *)
-module BaseRw : sig
-  val process_addrw : scope -> (pqsymbol * pqsymbol list) -> scope
+module Notations : sig
+  val add : scope -> pnotation located -> scope
+  val add_abbrev : scope -> pabbrev located -> scope
+end
+
+(* -------------------------------------------------------------------- *)
+module Auto : sig
+  val addrw : scope -> (bool * pqsymbol * pqsymbol list) -> scope
+  val addat : scope -> (bool * pqsymbol list) -> scope
 end
 
 (* -------------------------------------------------------------------- *)

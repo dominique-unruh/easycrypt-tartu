@@ -87,7 +87,7 @@ theory RandOracle.
   lemma LRO_lossless_query:
     mu dsample cpTrue = 1%r => islossless LRO.query.
   proof strict.
-  intros=> samp.
+  move=> samp.
   fun.
     if.
       wp; rnd; skip; smt.
@@ -99,7 +99,7 @@ theory RandOracle.
   proof strict.
     fun. wp; skip; smt.
   qed.
-  
+
   lemma FRO_lossless_query:
     islossless FRO.query.
   proof strict.
@@ -109,10 +109,10 @@ theory RandOracle.
   lemma FRO_lossless_init:
     mu dsample Fun.cpTrue = 1%r => islossless FRO.init.
   proof strict.
-    intros H; fun.
+    move=> H; fun.
     inline FRO.resample.
     while true (length xs).
-     by intros z; wp; rnd; wp; skip; smt.
+     by move=> z; wp; rnd; wp; skip; smt.
      wp; skip; smt.
   qed.
 
@@ -151,17 +151,17 @@ theory RandOracle.
     }
   }.
 
-  lemma Fixed_Lazy_query : 
+  lemma Fixed_Lazy_query :
         mu dsample cpTrue = 1%r =>
         eager[ FRO.resample();, FRO.query ~ LRO.query, LRO.resample(); :
         ={x} /\ FRO.m{1} = LRO.m{2} ==> ={res} /\ FRO.m{1} = LRO.m{2}].
   proof.
-   intros Hsample; eager fun.
+   move=> Hsample; eager fun.
      inline FRO.resample LRO.resample.
      swap{2} 3 -2;seq 1 1 : (={x,xs} /\ FRO.m{1} = LRO.m{2} /\ (List.mem x xs){1}).
        wp;skip;progress;smt.
      if{2}.
-      transitivity{1} {y0 = $dsample; 
+      transitivity{1} {y0 = $dsample;
                        while (! xs = []) {
                          x0 = hd xs; xs = tl xs; y = $dsample;
                          if (! in_dom x0 FRO.m) FRO.m = FRO.m.[x0 <- if x = x0 then y0 else y];
@@ -169,19 +169,19 @@ theory RandOracle.
                        result = proj FRO.m.[x]; }
                       (={x,xs,FRO.m} ==> ={result,FRO.m})
                       ((={x, xs} /\ FRO.m{1} = LRO.m{2} /\ mem x{1} xs{1}) /\ ! in_dom x{2} LRO.m{2} ==> ={result} /\ FRO.m{1} = LRO.m{2}) => //.
-        intros &m1 &m2 H;exists LRO.m{m2}, x{m2}, xs{m2}; generalize H => //.      
+        move=> &m1 &m2 H;exists LRO.m{m2}, x{m2}, xs{m2}; move: H => //.
       transitivity{1} {
                        while (! xs = []) {
                          x0 = hd xs; xs = tl xs; y = $dsample;
                          if (! in_dom x0 FRO.m) FRO.m = FRO.m.[x0 <- y];
                        }
-                       y0 = $dsample; 
+                       y0 = $dsample;
                        result = proj FRO.m.[x]; }
                       (={x,xs,FRO.m} ==> ={result,FRO.m})
                       (={x, xs,FRO.m} ==> ={result,FRO.m}) => //.
-         intros &m1 &m2 H;exists FRO.m{m2}, x{m2}, xs{m2}; generalize H => //.    
-         eqobs_in;rnd{2};conseq (_ : _ ==> ={x,FRO.m});[ progress;smt | eqobs_in].
-         wp;symmetry. 
+         move=> &m1 &m2 H;exists FRO.m{m2}, x{m2}, xs{m2}; move: H => //.
+         eqobs_in;rnd{2};conseq [-frame] (_ : _ ==> ={x,FRO.m});[ progress;smt | eqobs_in].
+         wp;symmetry.
          eager while (h1:y0 = $dsample; ~ y0 = $dsample; : true ==> ={y0}) => //; first eqobs_in.
          swap{2} 5 -4. swap 4 -2.
          case (x = hd xs){1}.
@@ -195,7 +195,7 @@ theory RandOracle.
               if in_dom x{1} FRO.m{1} then FRO.m{1} = LRO.m{2} /\ (FRO.m.[x] = Some y0){1} else (FRO.m.[x <- y0]){1} = LRO.m{2}).
          wp;rnd;wp;skip;progress=> //;smt.
        wp;rnd;skip;progress;smt.
-      wp;while ((={x,xs} /\ FRO.m{1} = LRO.m{2}) /\ in_dom x{2} LRO.m{2} /\ 
+      wp;while ((={x,xs} /\ FRO.m{1} = LRO.m{2}) /\ in_dom x{2} LRO.m{2} /\
                  proj FRO.m{1}.[x{1}] = result{2}).
        wp;rnd;wp;skip;progress => //; smt.
     wp;skip;progress => //.
@@ -205,11 +205,11 @@ theory RandOracle.
     mu dsample cpTrue = 1%r =>
     equiv [ G(FRO,UF).main ~ GL(UF).main : ={x} ==> ={res, glob UF} ].
   proof.
-    intros Hsample;fun;inline LRO.init FRO.init.
+    move=> Hsample;fun;inline LRO.init FRO.init.
     seq 1 1 : (FRO.m{1} = LRO.m{2} /\ ={x}); first eqobs_in.
-    eager (h : FRO.resample(); ~ LRO.resample(); : FRO.m{1} = LRO.m{2} ==> FRO.m{1} = LRO.m{2}) : 
+    eager (h : FRO.resample(); ~ LRO.resample(); : FRO.m{1} = LRO.m{2} ==> FRO.m{1} = LRO.m{2}) :
        (FRO.m{1} = LRO.m{2}) => //.
-     eqobs_in. 
+     eqobs_in.
      eager fun h (FRO.m{1} = LRO.m{2}) => //.
      apply Fixed_Lazy_query => //.
      fun;eqobs_in.
@@ -219,14 +219,14 @@ theory RandOracle.
     mu dsample cpTrue = 1%r =>
     equiv [ G(FRO,UF).main ~ G(LRO,UF).main : ={x} ==> ={res} ].
   proof.
-    intros Hsample;transitivity GL(UF).main (={x} ==> ={res, glob UF}) (={x} ==> ={res}) => //.
-      intros &m1 &m2 H;exists x{m2} => //.
+    move=> Hsample;transitivity GL(UF).main (={x} ==> ={res, glob UF}) (={x} ==> ={res}) => //.
+      move=> &m1 &m2 H;exists x{m2} => //.
     apply (Fixed_Lazy_dh_equiv_GL UF _) => //.
     fun.
     seq 2 2 : (={r}); first eqobs_in.
-    inline LRO.resample. 
+    inline LRO.resample.
       while{1} true (length xs{1}).
-      intros &m z;wp;rnd;wp;skip;progress;smt.
+      move=> &m z;wp;rnd;wp;skip;progress;smt.
     wp;skip;smt.
   save.
 
@@ -234,7 +234,7 @@ theory RandOracle.
     mu dsample cpTrue = 1%r =>
     equiv [ G(LRO,UF).main ~ G(FRO,UF).main : ={x} ==> ={res} ].
   proof strict.
-    intros Hsample;symmetry. conseq (_ : ={x} ==> ={res}) => //.
+    move=> Hsample;symmetry. conseq [-frame] (_ : ={x} ==> ={res}) => //.
     apply (Fixed_Lazy_dh_equiv UF _) => //.
   qed.
 end RandOracle.

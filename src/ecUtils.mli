@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -122,11 +124,13 @@ val oiter      : ('a -> unit) -> 'a option -> unit
 val obind      : ('a -> 'b option) -> 'a option -> 'b option
 val ofold      : ('a -> 'b -> 'b) -> 'b -> 'a option -> 'b
 val omap       : ('a -> 'b) -> 'a option -> 'b option
+val oif        : ('a -> bool) -> 'a option -> bool
 val odfl       : 'a -> 'a option -> 'a
 val ofdfl      : (unit -> 'a) -> 'a option -> 'a
-val oget       : 'a option -> 'a
+val oget       : ?exn:exn -> 'a option -> 'a
 val oall2      : ('a -> 'b -> bool) -> 'a option -> 'b option -> bool
 val otolist    : 'a option -> 'a list
+val oeq        : ('a -> 'a -> bool) -> ('a option -> 'a option -> bool)
 val ocompare   : 'a cmp -> 'a option cmp
 val omap_dfl   : ('a -> 'b) -> 'b -> 'a option -> 'b
 
@@ -145,6 +149,7 @@ val notag  : 'a -> ('a, 'b) tagged
 
 (* -------------------------------------------------------------------- *)
 val iterop: ('a -> 'a) -> int -> 'a -> 'a
+val iter: ('a -> 'a) -> 'a -> 'b
 
 (* -------------------------------------------------------------------- *)
 module OneShot : sig
@@ -194,16 +199,27 @@ module String : sig
 end
 
 (* -------------------------------------------------------------------- *)
+module IO : sig
+  include module type of BatIO
+end
+
+(* -------------------------------------------------------------------- *)
+module File : sig
+  include module type of BatFile
+
+  val read_from_file :
+    offset:int -> length:int -> string -> string
+
+  val write_to_file :
+    output:string -> string -> unit
+end
+
+(* -------------------------------------------------------------------- *)
 module Buffer : sig
   include module type of BatBuffer
 
   val from_string : ?size:int -> string -> t
   val from_char   : ?size:int -> char -> t
-end
-
-(* -------------------------------------------------------------------- *)
-module Regexp : sig
-  include module type of Str
 end
 
 (* -------------------------------------------------------------------- *)
@@ -251,6 +267,7 @@ module List : sig
   val pivot_at   : int -> 'a list -> 'a list * 'a * 'a list
   val find_pivot : ('a -> bool) -> 'a list -> 'a list * 'a * 'a list
   val map_fold   : ('a -> 'b -> 'a * 'c) -> 'a -> 'b list -> 'a * 'c list
+  val mapi_fold  : (int -> 'a -> 'b -> 'a * 'c) -> 'a -> 'b list -> 'a * 'c list
   val pmap       : ('a -> 'b option) -> 'a list -> 'b list
   val rev_pmap   : ('a -> 'b option) -> 'a list -> 'b list
   val rotate     : [`Left|`Right] -> int -> 'a list -> int * 'a list
@@ -259,7 +276,7 @@ module List : sig
   val ksort:
         ?stable:bool -> ?rev:bool
      -> key:('a -> 'b)
-     -> cmp:('b -> 'b -> int) 
+     -> cmp:('b -> 'b -> int)
      -> 'a list -> 'a list
 end
 
@@ -268,36 +285,20 @@ module Parray : sig
   type 'a t
 
   val empty : 'a t
-
   val get : 'a t -> int -> 'a
-
   val length : 'a t -> int
-
   val of_list : 'a list -> 'a t
-
   val to_list : 'a t -> 'a list
-
   val of_array : 'a array -> 'a t
-
   val init : int -> (int -> 'a) -> 'a t
-
   val map : ('a -> 'b) -> 'a t -> 'b t
-
   val fmap : ('a -> 'b) -> 'a list -> 'b t
-
   val fold_left : ('a -> 'b -> 'a) -> 'a -> 'b t -> 'a
-
   val fold_right : ('b -> 'a -> 'a) -> 'b t -> 'a -> 'a
-
   val fold_left2 : ('a -> 'b -> 'c -> 'a) -> 'a -> 'b t -> 'c t -> 'a
-
   val iter : ('a -> unit) -> 'a t -> unit
-
   val iter2 : ('a -> 'b -> unit) -> 'a t -> 'b t -> unit
-
   val split : ('a * 'b) t -> ('a t * 'b t)
-
   val exists : ('a -> bool) -> 'a t -> bool
-
   val for_all : ('a -> bool) -> 'a t -> bool
 end

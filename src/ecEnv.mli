@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -39,7 +41,9 @@ val gstate : env -> EcGState.gstate
 val copy   : env -> env
 
 (* -------------------------------------------------------------------- *)
-val notify : env -> EcGState.loglevel -> ('a, Format.formatter, unit, unit) format4 -> 'a
+val notify :
+     ?immediate:bool -> env -> EcGState.loglevel
+  -> ('a, Format.formatter, unit, unit) format4 -> 'a
 
 (* -------------------------------------------------------------------- *)
 type lookup_error = [
@@ -51,6 +55,10 @@ type lookup_error = [
 ]
 
 exception LookupFailure of lookup_error
+exception DuplicatedBinding of symbol
+
+(* -------------------------------------------------------------------- *)
+exception NotReducible
 
 (* -------------------------------------------------------------------- *)
 type meerror =
@@ -64,7 +72,7 @@ module Memory : sig
   val get_active  : env -> memory option
 
   val byid        : memory -> env -> memenv option
-  val lookup      : int -> symbol -> env -> memenv option
+  val lookup      : symbol -> env -> memenv option
   val current     : env -> memenv option
   val push        : memenv -> env -> env
   val push_all    : memenv list -> env -> env
@@ -100,6 +108,8 @@ module Fun : sig
   val hoareS : xpath -> env -> memenv * (funsig * function_def) * env
 
   val actmem_post :  memory -> xpath -> function_ -> memenv
+
+  val inv_memory : [`Left|`Right] -> env -> memenv
 
   val inv_memenv : env -> env
 
@@ -155,9 +165,9 @@ module Ax : sig
   val add  : path -> env -> env
   val bind : symbol -> axiom -> env -> env
 
-  val iter : ?name:qsymbol -> (path -> axiom -> unit) -> env -> unit 
+  val iter : ?name:qsymbol -> (path -> axiom -> unit) -> env -> unit
 
-  val all : 
+  val all :
     ?check:(path -> axiom -> bool) -> ?name:qsymbol -> env -> (path * t) list
 
   val instanciate : path -> EcTypes.ty list -> env -> form
@@ -236,10 +246,6 @@ module NormMp : sig
 end
 
 (* -------------------------------------------------------------------- *)
-type ctheory_w3
-
-val ctheory_of_ctheory_w3 : ctheory_w3 -> ctheory
-
 module Theory : sig
   type t    = ctheory
   type mode = [`All | thmode]
@@ -251,14 +257,18 @@ module Theory : sig
   val lookup_path : ?mode:mode -> qsymbol -> env -> path
 
   val add  : path -> env -> env
-  val bind : ?mode:thmode -> symbol -> ctheory_w3 -> env -> env
+  val bind : ?mode:thmode -> symbol -> ctheory -> env -> env
 
-  val require : ?mode:thmode -> symbol -> ctheory_w3 -> env -> env
+  val require : ?mode:thmode -> symbol -> ctheory -> env -> env
   val import  : path -> env -> env
   val export  : path -> env -> env
 
   val enter : symbol -> env -> env
-  val close : env -> ctheory_w3
+
+  val close :
+       ?clears:(path list)
+    -> ?pempty:[`Full | `ClearOnly | `No]
+    -> env -> ctheory option
 end
 
 (* -------------------------------------------------------------------- *)
@@ -283,6 +293,15 @@ module Op : sig
   val is_record_ctor : env -> path -> bool
   val is_dtype_ctor  : env -> path -> bool
   val is_fix_def     : env -> path -> bool
+  val is_abbrev      : env -> path -> bool
+  val is_prind       : env -> path -> bool
+
+  val scheme_of_prind :
+    env -> [`Ind | `Case] -> EcPath.path -> (path * int) option
+
+  type notation = ty_params * EcDecl.notation
+
+  val get_notations : env -> (path * notation) list
 end
 
 (* -------------------------------------------------------------------- *)
@@ -333,17 +352,26 @@ module TypeClass : sig
 end
 (* -------------------------------------------------------------------- *)
 module BaseRw : sig
-  type t = Sp.t
-  val by_path : path -> env -> Sp.t 
-  val lookup : qsymbol -> env -> path * Sp.t
-  val lookup_opt : qsymbol -> env -> (path * Sp.t) option
-  val is_base : qsymbol -> env -> bool
-  val bind : symbol -> env -> env
-  val bind_addrw : path -> path list -> env -> env
+  val by_path     : path -> env -> Sp.t
+  val lookup      : qsymbol -> env -> path * Sp.t
+  val lookup_opt  : qsymbol -> env -> (path * Sp.t) option
+  val lookup_path : qsymbol -> env -> path
+  val is_base     : qsymbol -> env -> bool
+
+  val add   : symbol -> env -> env
+  val addto : path -> path list -> env -> env
 end
+
+(* -------------------------------------------------------------------- *)
+module Auto : sig
+  val add1 : local:bool -> path -> env -> env
+  val add  : local:bool -> Sp.t -> env -> env
+  val get  : env -> Sp.t
+end
+
 (* -------------------------------------------------------------------- *)
 module AbsStmt : sig
-  type t = EcBaseLogic.abs_uses
+  type t = EcModules.abs_uses
 
   val byid : EcIdent.t -> env -> t
 end
@@ -359,25 +387,17 @@ type ebinding = [
 val bind1   : symbol * ebinding -> env -> env
 val bindall : (symbol * ebinding) list -> env -> env
 
-val import_w3_dir :
-     env -> string list -> string
-  -> EcWhy3.renaming_decl
-  -> env * ctheory_item list
-
 (* -------------------------------------------------------------------- *)
 open EcBaseLogic
 
 module LDecl : sig
   type error =
-    | UnknownSymbol   of EcSymbols.symbol
-    | UnknownIdent    of EcIdent.t
-    | NotAVariable    of EcIdent.t
-    | NotAHypothesis  of EcIdent.t
-    | CanNotClear     of EcIdent.t * EcIdent.t
-    | DuplicateIdent  of EcIdent.t
-    | DuplicateSymbol of EcSymbols.symbol
+  | InvalidKind     of EcIdent.t * [`Variable | `Hypothesis]
+  | CannotClear     of EcIdent.t * EcIdent.t
+  | NameClash       of [`Ident of EcIdent.t | `Symbol of symbol]
+  | LookupError     of [`Ident of EcIdent.t | `Symbol of symbol]
 
-  exception Ldecl_error of error
+  exception LdeclError of error
 
   type hyps
 
@@ -386,38 +406,48 @@ module LDecl : sig
   val toenv   : hyps -> env
   val baseenv : hyps -> env
 
+  val ld_subst  : f_subst -> local_kind -> local_kind
   val add_local : EcIdent.t -> local_kind -> hyps -> hyps
 
-  val lookup : symbol -> hyps -> l_local
+  val by_name : symbol    -> hyps -> l_local
+  val by_id   : EcIdent.t -> hyps -> local_kind
 
-  val reducible_var : EcIdent.t -> hyps -> bool
-  val reduce_var    : EcIdent.t -> hyps -> form
-  val lookup_var    : symbol -> hyps -> EcIdent.t * ty
+  val has_name : symbol    -> hyps -> bool
+  val has_id   : EcIdent.t -> hyps -> bool
 
-  val lookup_by_id     : EcIdent.t -> hyps -> local_kind
-  val lookup_hyp_by_id : EcIdent.t -> hyps -> form
+  val as_var : l_local -> EcIdent.t * ty
+  val as_hyp : l_local -> EcIdent.t * form
 
-  val has_hyp : symbol -> hyps -> bool
-  val lookup_hyp : symbol -> hyps -> EcIdent.t * form
-  val get_hyp : EcIdent.t * local_kind -> EcIdent.t * form
+  val hyp_by_name : symbol    -> hyps -> EcIdent.t * form
+  val hyp_exists  : symbol    -> hyps -> bool
+  val hyp_by_id   : EcIdent.t -> hyps -> form
 
-  val has_symbol : symbol -> hyps -> bool
+  val var_by_name : symbol    -> hyps -> EcIdent.t * ty
+  val var_exists  : symbol    -> hyps -> bool
+  val var_by_id   : EcIdent.t -> hyps -> ty
+
+  val local_hyps  : EcIdent.t -> hyps -> hyps
+
+  val hyp_convert :
+       EcIdent.t
+    -> (hyps Lazy.t -> form -> form)
+    -> hyps
+    -> hyps option
+
+  val can_unfold : EcIdent.t -> hyps -> bool
+  val unfold     : EcIdent.t -> hyps -> form
 
   val fresh_id  : hyps -> symbol -> EcIdent.t
   val fresh_ids : hyps -> symbol list -> EcIdent.t list
 
-  val clear : EcIdent.Sid.t -> hyps -> hyps
-
-  val ld_subst : f_subst -> local_kind -> local_kind
+  val clear : ?leniant:bool -> EcIdent.Sid.t -> hyps -> hyps
 
   val push_all    : memenv list -> hyps -> hyps
   val push_active : memenv -> hyps -> hyps
 
   val hoareF : xpath -> hyps -> hyps * hyps
   val equivF : xpath -> xpath -> hyps -> hyps * hyps
+
   val inv_memenv  : hyps -> hyps
   val inv_memenv1 : hyps -> hyps
 end
-
-(* -------------------------------------------------------------------- *)
-val check_goal : EcProvers.prover_infos -> LDecl.hyps * form -> bool

@@ -5,7 +5,6 @@ OCAMLBUILD_JOBS  ?= 1
 OCAMLBUILD_BIN   ?= ocamlbuild
 OCAMLBUILD_EXTRA ?= 
 OCAMLBUILD_OPTS  := -use-ocamlfind -j $(OCAMLBUILD_JOBS)
-OCAMLBUILD_OPTS  += -classic-display
 
 # In Emacs, use classic display to enable error jumping.
 ifeq ($(shell echo $$TERM), dumb)
@@ -38,15 +37,20 @@ XUNITOUT  ?= xunit.xml
 ECARGS    ?=
 ECTOUT    ?= 5
 ECJOBS    ?= 1
-CHECK     := scripts/testing/runtest
-CHECK     += --bin-args="$(ECARGS)" --timeout="$(ECTOUT)" --jobs="$(ECJOBS)"
-CHECK     += config/tests.config
-CHECKCATS ?= prelude core theories encryption newth realized
+ECEXTRA   ?= --pretty
+ECPROVERS ?= Alt-Ergo Z3 Eprover
+CHECKPY   ?=
+CHECK     := $(CHECKPY) scripts/testing/runtest
+CHECK     += --bin-args="$(ECARGS)" --bin-args="$(ECPROVERS:%=-p %)"
+CHECK     += --timeout="$(ECTOUT)" --jobs="$(ECJOBS)"
+CHECK     += $(ECEXTRA) config/tests.config
+CHECKCATS ?= prelude stdlib
 
 # --------------------------------------------------------------------
 .PHONY: all build byte native tests check weak-check check-xunit examples
 .PHONY: clean install uninstall uninstall-purge dist distcheck
-.PHONY: callprover pg toolchain update-toolchain provers
+.PHONY: callprover toolchain update-toolchain provers license
+.PHONY: pg pg-keywords
 .PHONY: %.ml %.mli %.inferred.mli
 
 all: build
@@ -128,6 +132,12 @@ weak-check: ec.native
 check-xunit: ec.native
 	$(CHECK) --xunit="$(XUNITOUT)" $(CHECKCATS)
 
+license:
+	scripts/srctx/license COPYRIGHT.yaml \
+	  $(shell find src -name '*.ml' -o -name '*.ml[a-z]') \
+	  $(shell find theories -name '*.ec' -o -name '*.ec[a-z]') \
+	  $(shell find proofgeneral/easycrypt -name '*.el')
+
 clean:
 	$(OCAMLBUILD) -clean
 	rm -f ec.native ec.byte
@@ -176,6 +186,18 @@ pg:
 	    echo "Toolchain activation failed" >&2; \
 	  fi; \
 	fi; $(MAKE) -C proofgeneral run-local
+
+pg-keywords:
+	@if git status --porcelain | grep -v '^??' >/dev/null; then \
+	  echo '[E] git working copy is in a dirty state' >&2; \
+	  echo '[E] (or the `git` command failed)' >&2; \
+    exit 1; \
+  fi
+	$(MAKE) -C proofgeneral keywords
+	git add -- proofgeneral/easycrypt/easycrypt-keywords.el
+	if git status --porcelain -- $(OUTDIR) | grep -v '^??' >/dev/null; then \
+    git commit -m 'PG keywords updated'; \
+	fi
 
 # --------------------------------------------------------------------
 toolchain:

@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -10,15 +12,6 @@ open EcSymbols
 open EcTypes
 open EcFol
 open EcEnv
-
-(* -------------------------------------------------------------------- *)
-type location = {
-  plc_parent : location option;
-  plc_name   : string option;
-  plc_loc    : EcLocation.t;
-}
-
-exception TcError of bool * location option * string Lazy.t
 
 (* -------------------------------------------------------------------- *)
 exception InvalidGoalShape
@@ -90,7 +83,7 @@ val palocal   : EcIdent.t -> pt_arg
 
 (* -------------------------------------------------------------------- *)
 (* EasyCrypt rewrite proof-term:                                        *)
-(*  rwpt := pt * position list                                          *)
+(*  rwpt := pt * position list * local hyp                              *)
 (*    <pt>: equality-proof term                                         *)
 (*                                                                      *)
 (*  position := EcMatching.ptnpos - pattern position                    *)
@@ -98,6 +91,7 @@ val palocal   : EcIdent.t -> pt_arg
 type rwproofterm = {
   rpt_proof : proofterm;
   rpt_occrs : EcMatching.ptnpos option;
+  rpt_lc    : ident option;
 }
 
 (* -------------------------------------------------------------------- *)
@@ -140,11 +134,33 @@ type validation =
 | VAdmit                             (* admit *)
 | VIntros  of (handle * idents)      (* intros *)
 | VConv    of (handle * Sid.t)       (* weakening + conversion *)
+| VLConv   of (handle * ident)       (* hypothesis conversion *)
 | VRewrite of (handle * rwproofterm) (* rewrite *)
 | VApply   of proofterm              (* modus ponens *)
 
   (* external (hl/phl/prhl/...) proof-node *)
 | VExtern  : 'a * handle list -> validation
+
+(* -------------------------------------------------------------------- *)
+type location = {
+  plc_parent : location option;
+  plc_name   : string option;
+  plc_loc    : EcLocation.t;
+}
+
+type tcemsg =
+| TCEUser : 'a * ('a -> string) -> tcemsg
+| TCEExn  : exn -> tcemsg
+
+type tcerror =  {
+  tc_catchable : bool;
+  tc_proofenv  : proofenv option;
+  tc_location  : location option;
+  tc_message   : tcemsg;
+  tc_reloced   : (symbol * bool) option;
+}
+
+exception TcError of tcerror
 
 (* -------------------------------------------------------------------- *)
 val tcenv1_of_proof   : proof  -> tcenv1
@@ -176,15 +192,20 @@ val tc_error :
      proofenv -> ?catchable:bool -> ?loc:EcLocation.t -> ?who:string
   -> ('a, Format.formatter, unit, 'b) format4 -> 'a
 
-val tacuerror : ?catchable:bool -> ('a, Format.formatter, unit, 'b) format4 -> 'a
+val tc_error_exn :
+     proofenv -> ?catchable:bool -> ?loc:EcLocation.t -> ?who:string
+  -> exn -> 'a
 
 val tc_error_lazy :
      proofenv -> ?catchable:bool -> ?loc:EcLocation.t -> ?who:string
   -> (Format.formatter -> unit) -> 'a
 
-val tc_error_clear :
-     proofenv -> ?catchable:bool -> ?loc:EcLocation.t -> ?who:string
-  -> clearerror Lazy.t -> 'a
+(* -------------------------------------------------------------------- *)
+val tacuerror :
+  ?catchable:bool -> ('a, Format.formatter, unit, 'b) format4 -> 'a
+
+val tacuerror_exn :
+  ?catchable:bool -> exn -> 'a
 
 (* -------------------------------------------------------------------- *)
 type symkind = [`Lemma | `Operator | `Local]
@@ -210,14 +231,16 @@ module FApi : sig
 
   exception InvalidStateException of string
 
-  type forward  = proofenv -> proofenv * handle
-  type backward = tcenv1 -> tcenv
-  type tactical = tcenv -> tcenv
+  type forward   = proofenv -> proofenv * handle
+  type backward  = tcenv1 -> tcenv
+  type ibackward = int -> backward
+  type tactical  = tcenv -> tcenv
 
   val tcenv_of_tcenv1 : tcenv1 -> tcenv
   val as_tcenv1 : tcenv -> tcenv1
 
   val get_pregoal_by_id : handle -> proofenv -> pregoal
+  val get_main_pregoal  : proofenv -> pregoal
 
   (* Create a new opened goal for the given [form] in the backward
    * environment [tcenv]. If no local context [LDecl.hyps] is given,
@@ -259,24 +282,25 @@ module FApi : sig
     -> proofenv * handle
 
   (* Check if a tcenv is closed (no focused goal *)
-  val tc_done  : tcenv -> bool
-  val tc_count : tcenv -> int
+  val tc_done   : tcenv -> bool
+  val tc_count  : tcenv -> int
+  val tc_opened : tcenv -> handle list
 
   (* Accessors for focused goal parts (tcenv) *)
   val tc_handle  : tcenv -> handle
   val tc_penv    : tcenv -> proofenv
-  val tc_flat    : tcenv -> LDecl.hyps * form
-  val tc_eflat   : tcenv -> env * LDecl.hyps * form
-  val tc_hyps    : tcenv -> LDecl.hyps
   val tc_goal    : tcenv -> form
   val tc_env     : tcenv -> EcEnv.env
+  val tc_flat    : ?target:ident -> tcenv -> LDecl.hyps * form
+  val tc_eflat   : ?target:ident -> tcenv -> env * LDecl.hyps * form
+  val tc_hyps    : ?target:ident -> tcenv -> LDecl.hyps
 
   (* Accessors for focused goal parts (tcenv1) *)
   val tc1_handle : tcenv1 -> handle
   val tc1_penv   : tcenv1 -> proofenv
-  val tc1_flat   : tcenv1 -> LDecl.hyps * form
-  val tc1_eflat  : tcenv1 -> env * LDecl.hyps * form
-  val tc1_hyps   : tcenv1 -> LDecl.hyps
+  val tc1_flat   : ?target:ident -> tcenv1 -> LDecl.hyps * form
+  val tc1_eflat  : ?target:ident -> tcenv1 -> env * LDecl.hyps * form
+  val tc1_hyps   : ?target:ident -> tcenv1 -> LDecl.hyps
   val tc1_goal   : tcenv1 -> form
   val tc1_env    : tcenv1 -> EcEnv.env
 
@@ -292,8 +316,11 @@ module FApi : sig
   type tfocus    = (int -> bool)
 
   val t_focus      : backward -> tactical
+  val t_map        : (tcenv1 -> 'a * tcenv) -> tcenv -> 'a list * tcenv
+  val t_onalli     : (int -> backward) -> tactical
   val t_onall      : backward -> tactical
   val t_onfsub     : (int -> backward option) -> tactical
+  val t_onselecti  : tfocus -> ?ttout:ibackward -> ibackward -> tactical
   val t_onselect   : tfocus -> ?ttout:backward -> backward -> tactical
   val t_on1        : int -> ?ttout:backward -> backward -> tactical
   val t_firsts     : backward -> int -> tactical
@@ -306,12 +333,15 @@ module FApi : sig
   val t_swap_goals : int -> int -> tactical
 
   val t_sub    : backward list -> tactical
+  val t_submap : (tcenv1 -> 'a * tcenv) list -> tcenv -> 'a list * tcenv
 
   val t_seq    : backward -> backward -> backward
   val t_seqs   : backward list -> backward
 
   val t_seqsub : backward -> backward list -> backward
   val t_on1seq : int -> backward -> ?ttout:backward -> backward -> backward
+
+  val t_try_base : backward -> tcenv1 -> [`Failure of exn | `Success of tcenv]
 
   val t_try    : backward -> backward
   val t_switch : ?on:[`All|`Focus] -> backward -> ifok:backward -> iffail:backward -> backward
@@ -353,9 +383,9 @@ module RApi : sig
 
   (* Accessors for focused goal parts (rtcenv) *)
   val tc_penv  : rtcenv -> proofenv
-  val tc_flat  : rtcenv -> LDecl.hyps * form
-  val tc_eflat : rtcenv -> env * LDecl.hyps * form
-  val tc_hyps  : rtcenv -> LDecl.hyps
+  val tc_flat  : ?target:ident -> rtcenv -> LDecl.hyps * form
+  val tc_eflat : ?target:ident -> rtcenv -> env * LDecl.hyps * form
+  val tc_hyps  : ?target:ident -> rtcenv -> LDecl.hyps
   val tc_goal  : rtcenv -> form
   val tc_env   : rtcenv -> env
 

@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -20,6 +22,7 @@ type rcerror =
 | RCE_TypeError        of TT.tyerror
 | RCE_DuplicatedField  of symbol
 | RCE_InvalidFieldType of symbol * TT.tyerror
+| RCE_Empty
 
 type dterror =
 | DTE_TypeError       of TT.tyerror
@@ -52,90 +55,6 @@ let dterror loc env e = raise (DtError (loc, env, e))
 let fxerror loc env e = raise (FxError (loc, env, e))
 
 (* -------------------------------------------------------------------- *)
-let pp_rcerror env fmt error =
-  let msg x = Format.fprintf fmt x in
-
-  match error with
-  | RCE_TypeError ee ->
-      TT.pp_tyerror env fmt ee
-
-  | RCE_DuplicatedField name ->
-      msg "duplicated field: `%s'" name
-
-  | RCE_InvalidFieldType (name, ee) ->
-      msg "invalid field type: `%s`: %a'" name (TT.pp_tyerror env) ee
-
-(* -------------------------------------------------------------------- *)
-let pp_dterror env fmt error =
-  let msg x = Format.fprintf fmt x in
-
-  match error with
-  | DTE_TypeError ee ->
-      TT.pp_tyerror env fmt ee
-
-  | DTE_DuplicatedCtor name ->
-      msg "duplicated constructor name: `%s'" name
-
-  | DTE_InvalidCTorType (name, ee) ->
-      msg "invalid constructor type: `%s`: %a'"
-        name (TT.pp_tyerror env) ee
-
-  | DTE_NonPositive ->
-      msg "the datatype does not respect the positivity condition"
-
-  | DTE_Empty ->
-      msg "the datatype is empty"
-
-(* -------------------------------------------------------------------- *)
-let pp_fxerror env fmt error =
-  let msg x = Format.fprintf fmt x in
-
-  match error with
-  | FXE_TypeError ee ->
-      TT.pp_tyerror env fmt ee
-
-  | FXE_EmptyMatch ->
-      msg "this pattern matching has no branches"
-
-  | FXE_MatchParamsMixed ->
-      msg "this pattern matching matches on different parameters"
-
-  | FXE_MatchParamsDup ->
-      msg "this pattern matching matches a parameter twice"
-
-  | FXE_MatchParamsUnk ->
-      msg "this pattern matching matches an unbound parameter"
-
-  | FXE_MatchNonLinear ->
-      msg "this pattern is non-linear"
-
-  | FXE_MatchDupBranches ->
-      msg "this pattern matching contains duplicated branches"
-
-  | FXE_MatchPartial ->
-      msg "this pattern matching is non-exhaustive"
-
-  | FXE_CtorUnk ->
-      msg "unknown constructor name"
-
-  | FXE_CtorAmbiguous ->
-      msg "ambiguous constructor name"
-
-  | FXE_CtorInvalidArity _ ->
-      ()
-
-(* -------------------------------------------------------------------- *)
-let () =
-  let pp fmt exn =
-    match exn with
-    | RcError (_, env, e) -> pp_rcerror env fmt e
-    | DtError (_, env, e) -> pp_dterror env fmt e
-    | FxError (_, env, e) -> pp_fxerror env fmt e
-    | _ -> raise exn
-
-  in EcPException.register pp
-
-(* -------------------------------------------------------------------- *)
 let trans_record (env : EcEnv.env) (name : ptydname) (rc : precord) =
   let { pl_loc = loc; pl_desc = (tyvars, name); } = name in
 
@@ -146,6 +65,10 @@ let trans_record (env : EcEnv.env) (name : ptydname) (rc : precord) =
   (* Check for duplicated field names *)
   Msym.odup unloc (List.map fst rc) |> oiter (fun (x, y) ->
     rcerror y.pl_loc env (RCE_DuplicatedField x.pl_desc));
+
+  (* Check for emptyness *)
+  if List.is_empty rc then
+    rcerror loc env RCE_Empty;
 
   (* Type-check field types *)
   let fields =
@@ -179,6 +102,8 @@ let trans_datatype (env : EcEnv.env) (name : ptydname) (dt : pdatatype) =
       EcEnv.Ty.bind (unloc name) myself env
   in
 
+  let tparams = EcUnify.UniEnv.tparams ue in
+
   (* Check for duplicated constructor names *)
   Msym.odup unloc (List.map fst dt) |> oiter (fun (x, y) ->
     dterror y.pl_loc env (DTE_DuplicatedCtor x.pl_desc));
@@ -195,17 +120,50 @@ let trans_datatype (env : EcEnv.env) (name : ptydname) (dt : pdatatype) =
 
   (* Check for emptyness *)
   begin
-    let rec occurs p ty =
-      match (EcEnv.Ty.hnorm ty env0).ty_node with
-      | Tconstr (p', _) when EcPath.p_equal p p' -> true
-      | _ -> EcTypes.ty_sub_exists (occurs p) ty
+    let rec isempty_n (ctors : (ty list) list) =
+      List.for_all isempty_1 ctors
+
+    and isempty_1 (ctor : ty list) =
+      List.exists isempty ctor
+
+    and isempty (ty : ty) =
+      match ty.ty_node with
+      | Tglob   _ -> false
+      | Tvar    _ -> false
+      | Tunivar _ -> false
+
+      | Ttuple tys      -> List.exists isempty tys
+      | Tfun   (t1, t2) -> List.exists isempty [t1; t2]
+
+      | Tconstr (p, args) ->
+          isempty_dtype (args, p)
+
+    and isempty_dtype (targs, tname) =
+      if EcPath.p_equal tname tpath then true else
+
+      let tdecl = EcEnv.Ty.by_path_opt tname env0
+        |> ofdfl (EcDecl.abs_tydecl ~params:(`Named tparams)) in
+      let tyinst () =
+        fun ty -> ty_instanciate tdecl.tyd_params targs ty in
+
+      match tdecl.tyd_type with
+      | `Abstract _ ->
+          List.exists isempty (targs)
+
+      | `Concrete ty ->
+          isempty_1 [tyinst () ty]
+
+      | `Record (_, fields) ->
+          isempty_1 (List.map (tyinst () |- snd) fields)
+
+      | `Datatype dt ->
+          isempty_n (List.map (List.map (tyinst ()) |- snd) dt.tydt_ctors)
 
     in
-    if List.for_all (fun (_, cty) -> List.exists (occurs tpath) cty) ctors then
+
+    if isempty_n (List.map snd ctors) then
       dterror loc env DTE_Empty;
   end;
-
-  let tparams = EcUnify.UniEnv.tparams ue in
 
   { EI.dt_path = tpath; EI.dt_tparams = tparams; EI.dt_ctors = ctors; }
 
@@ -287,7 +245,7 @@ type matchfix_t =  {
 (* -------------------------------------------------------------------- *)
 let trans_matchfix ?(close = true) env ue { pl_loc = loc; pl_desc = name } (bd, pty, pbs) =
   let codom     = TT.transty TT.tp_relax env ue pty in
-  let env, args = TT.transbinding env ue bd in
+  let env, args = TT.trans_binding env ue bd in
   let ty        = EcTypes.toarrow (List.map snd args) codom in
   let opname    = EcIdent.create name in
   let env       = EcEnv.Var.bind_local opname ty env in
@@ -333,9 +291,9 @@ let trans_matchfix ?(close = true) env ue { pl_loc = loc; pl_desc = name } (bd, 
         let trans1 ((_, x, xty) : _ * EcIdent.t * ty) =
           let pb     = oget (Msym.find_opt (EcIdent.name x) pbmap) in
           let filter = fun op -> EcDecl.is_ctor op in
-          let cname  = fst pb.pop_pattern in
-          let tvi    = pb.pop_tvi |> omap (TT.transtvi env ue) in
-          let cts    = EcUnify.select_op ~filter tvi env (unloc cname) ue [] in
+          let PPApp ((cname, tvi), cargs) = pb.pop_pattern in
+          let tvi = tvi |> omap (TT.transtvi env ue) in
+          let cts = EcUnify.select_op ~filter tvi env (unloc cname) ue [] in
 
           match cts with
           | [] ->
@@ -344,7 +302,7 @@ let trans_matchfix ?(close = true) env ue { pl_loc = loc; pl_desc = name } (bd, 
           | _ :: _ :: _ ->
               fxerror cname.pl_loc env FXE_CtorAmbiguous
 
-          | [(cp, tvi), opty, subue] ->
+          | [(cp, tvi), opty, subue, _] ->
               let ctor = oget (EcEnv.Op.by_path_opt cp env) in
               let (indp, ctoridx) = EcDecl.operator_as_ctor ctor in
               let indty = oget (EcEnv.Ty.by_path_opt indp env) in
@@ -352,12 +310,14 @@ let trans_matchfix ?(close = true) env ue { pl_loc = loc; pl_desc = name } (bd, 
               let ctorsym, ctorty = List.nth ind ctoridx in
 
               let args_exp = List.length ctorty in
-              let args_got = List.length (snd pb.pop_pattern) in
+              let args_got = List.length cargs in
 
               if args_exp <> args_got then
                 fxerror cname.pl_loc env (FXE_CtorInvalidArity (args_exp, args_got));
 
-              if not (List.is_unique (List.map unloc (snd pb.pop_pattern))) then
+              let cargs_lin = List.pmap (fun o -> omap unloc (unloc o)) cargs in
+
+              if not (List.is_unique cargs_lin) then
                 fxerror cname.pl_loc env (FXE_MatchNonLinear);
 
               EcUnify.UniEnv.restore ~src:subue ~dst:ue;
@@ -371,10 +331,12 @@ let trans_matchfix ?(close = true) env ue { pl_loc = loc; pl_desc = name } (bd, 
                with EcUnify.UnificationFailure _ -> assert false);
               TT.unify_or_fail env ue pb.pop_name.pl_loc pty xty;
 
-              let pvars = List.map (EcIdent.create |- unloc) (snd pb.pop_pattern) in
+              let create o =
+                EcIdent.create (omap_dfl unloc "_" o) in
+              let pvars = List.map (create |- unloc) cargs in
               let pvars = List.combine pvars ctorty in
 
-                (pb, (indp, ind, (ctorsym, ctoridx)), pvars)
+              (pb, (indp, ind, (ctorsym, ctoridx)), pvars)
         in
 
         let ptns = List.map trans1 mpty in
@@ -427,12 +389,12 @@ let trans_matchfix ?(close = true) env ue { pl_loc = loc; pl_desc = name } (bd, 
         let lcmap = Mid.add opname opexpr e_subst_id.es_loc in
         { e_subst_id with es_freshen = false; es_ty = uni; es_loc = lcmap; }
       in
-    
+
       let branches =
         let rec uni_branches = function
           | OPB_Leaf (locals, e) ->
               OPB_Leaf (List.map (List.map (snd_map uni)) locals, e_subst ebsubst e)
-    
+
           | OPB_Branch bs ->
             let for1 b =
               { opb_ctor = b.opb_ctor;
@@ -441,7 +403,7 @@ let trans_matchfix ?(close = true) env ue { pl_loc = loc; pl_desc = name } (bd, 
               OPB_Branch (Parray.map for1 bs)
         in
           uni_branches branches
-  
+
       in { mf_name     = opname;
            mf_codom    = codom;
            mf_args     = args;

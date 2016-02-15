@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -12,6 +14,27 @@ open EcFol
 open EcEnv
 open EcMatching
 open EcCoreGoal
+
+(* -------------------------------------------------------------------- *)
+type apperror =
+  | AE_WrongArgKind of (argkind * argkind)
+  | AE_CannotInfer
+  | AE_CannotInferMod
+  | AE_NotFunctional
+  | AE_InvalidArgForm     of invalid_arg_form
+  | AE_InvalidArgMod
+  | AE_InvalidArgProof    of (form * form)
+  | AE_InvalidArgModRestr of EcTyping.restriction_error
+
+and argkind = [`Form | `Mem | `Mod | `PTerm]
+
+and invalid_arg_form =
+  | IAF_Mismatch of (ty * ty)
+  | IAF_TyError of env * EcTyping.tyerror
+
+type pterror = (LDecl.hyps * EcUnify.unienv * mevmap) * apperror
+
+exception ProofTermError of pterror
 
 (* -------------------------------------------------------------------- *)
 type pt_env = {
@@ -44,42 +67,73 @@ val trans_pterm_arg_mod   : pt_env -> ppt_arg located -> pt_ev_arg
 val trans_pterm_arg_mem   : pt_env -> ?name:symbol -> ppt_arg located -> pt_ev_arg
 
 (* Proof-terms typing *)
-val process_pterm_cut             : prcut:('a -> form) -> pt_env -> 'a ppt_head -> pt_ev
-val process_pterm                 : pt_env -> (pformula option) ppt_head -> pt_ev
-val process_pterm_arg             : ?implicits:bool -> pt_ev  -> ppt_arg located -> pt_ev_arg
-val process_pterm_args_app        : ?implicits:bool -> pt_ev  -> ppt_arg located list -> pt_ev
-val process_full_pterm_cut        : prcut:('a -> form) -> pt_env -> 'a gppterm -> pt_ev
-val process_full_pterm            : ?implicits:bool -> pt_env -> ppterm -> pt_ev
-val process_full_closed_pterm_cut : prcut:('a -> form) -> pt_env -> 'a gppterm -> proofterm * form
-val process_full_closed_pterm     : pt_env -> ppterm -> proofterm * form
+val process_pterm_cut
+  : prcut:('a -> form) -> pt_env -> 'a ppt_head -> pt_ev
+val process_pterm
+  : pt_env -> (pformula option) ppt_head -> pt_ev
+val process_pterm_arg
+   : ?implicits:bool -> pt_ev  -> ppt_arg located -> pt_ev_arg
+val process_pterm_args_app
+  :  ?implicits:bool -> ?ip:(bool list) -> pt_ev  -> ppt_arg located list
+  -> pt_ev * bool list
+val process_full_pterm_cut
+  : prcut:('a -> form) -> pt_env -> 'a gppterm -> pt_ev
+val process_full_pterm
+  : ?implicits:bool -> pt_env -> ppterm -> pt_ev
+val process_full_closed_pterm_cut
+  : prcut:('a -> form) -> pt_env -> 'a gppterm -> proofterm * form
+val process_full_closed_pterm
+  : pt_env -> ppterm -> proofterm * form
 
 (* Proof-terms typing in backward tactics *)
-val tc1_process_pterm_cut             : prcut:('a -> form) -> tcenv1 -> 'a ppt_head -> pt_ev
-val tc1_process_pterm                 : tcenv1 -> (pformula option) ppt_head -> pt_ev
-val tc1_process_full_pterm_cut        : prcut:('a -> form) -> tcenv1 -> 'a gppterm -> pt_ev
-val tc1_process_full_pterm            : ?implicits:bool -> tcenv1 -> ppterm -> pt_ev
-val tc1_process_full_closed_pterm_cut : prcut:('a -> form) -> tcenv1 -> 'a gppterm -> proofterm * form
-val tc1_process_full_closed_pterm     : tcenv1 -> ppterm -> proofterm * form
+val tc1_process_pterm_cut
+ : prcut:('a -> form) -> tcenv1 -> 'a ppt_head -> pt_ev
+val tc1_process_pterm
+ : tcenv1 -> (pformula option) ppt_head -> pt_ev
+val tc1_process_full_pterm_cut
+ : prcut:('a -> form) -> tcenv1 -> 'a gppterm -> pt_ev
+val tc1_process_full_pterm
+ : ?implicits:bool -> tcenv1 -> ppterm -> pt_ev
+val tc1_process_full_closed_pterm_cut
+ : prcut:('a -> form) -> tcenv1 -> 'a gppterm -> proofterm * form
+val tc1_process_full_closed_pterm
+ : tcenv1 -> ppterm -> proofterm * form
 
 (* Proof-terms manipulation *)
-val check_pterm_arg      : pt_env -> EcIdent.t * gty -> form -> pt_ev_arg_r -> form * pt_arg
+val check_pterm_arg :
+    ?loc:EcLocation.t
+  -> pt_env
+  -> EcIdent.t * gty
+  -> form
+  -> pt_ev_arg_r
+ -> form * pt_arg
+
 val apply_pterm_to_arg   : ?loc:EcLocation.t -> pt_ev -> pt_ev_arg -> pt_ev
 val apply_pterm_to_arg_r : ?loc:EcLocation.t -> pt_ev -> pt_ev_arg_r -> pt_ev
 val apply_pterm_to_hole  : ?loc:EcLocation.t -> pt_ev -> pt_ev
 val apply_pterm_to_holes : ?loc:EcLocation.t -> int -> pt_ev -> pt_ev
 
 (* pattern matching - raise [MatchFailure] on failure. *)
-val pf_form_match     : pt_env -> ?mode:fmoptions -> ptn:form -> form -> unit
-val pf_unify          : pt_env -> ty -> ty -> unit
-val pf_find_occurence : pt_env -> ?keyed:bool -> ptn:form -> form -> unit
+val pf_form_match : pt_env -> ?mode:fmoptions -> ptn:form -> form -> unit
+val pf_unify : pt_env -> ty -> ty -> unit
 
+(* pattern matching - raise [FindOccFailure] on failure. *)
+exception FindOccFailure of [`MatchFailure | `IncompleteMatch]
+
+type keyed = [`Yes | `No | `Lazy]
+
+val pf_find_occurence :
+  pt_env -> ?keyed:keyed -> ptn:form -> form -> unit
+
+val pf_find_occurence_lazy :
+  pt_env -> ptn:form -> form -> bool
+
+(* -------------------------------------------------------------------- *)
 val pattern_form :
      ?name:symbol -> LDecl.hyps -> ptn:form -> form
   -> EcIdent.t * form
 
 (* Proof-terms concretization, i.e. evmap/unienv resolution *)
-type cptenv
-
 val can_concretize  : pt_env -> bool
 val concretize_env  : pt_env -> cptenv
 val concretize      : pt_ev  -> proofterm * form
@@ -106,8 +160,8 @@ val ffpattern_of_genpattern : LDecl.hyps -> genpattern -> ppterm option
 
 (* -------------------------------------------------------------------- *)
 type prept = [
-  | `Hy   of EcIdent.t 
-  | `G    of EcPath.path * ty list 
+  | `Hy   of EcIdent.t
+  | `G    of EcPath.path * ty list
   | `UG   of EcPath.path
   | `App  of prept * prept_arg list
 ]

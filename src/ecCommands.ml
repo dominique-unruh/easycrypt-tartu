@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -12,17 +14,22 @@ module Sid = EcIdent.Sid
 module Mx  = EcPath.Mx
 
 (* -------------------------------------------------------------------- *)
+exception Restart
+
+(* -------------------------------------------------------------------- *)
 type pragma = {
   pm_verbose : bool; (* true  => display goal after each command *)
   pm_g_prall : bool; (* true  => display all open goals *)
   pm_check   : [`Check | `WeakCheck | `Report];
 }
 
-let pragma = ref {
+let dpragma = {
   pm_verbose = true  ;
   pm_g_prall = false ;
   pm_check   = `Check;
 }
+
+let pragma = ref dpragma
 
 let pragma_verbose (b : bool) =
   pragma := { !pragma with pm_verbose = b; }
@@ -64,120 +71,133 @@ let apply_pragma (x : string) =
   | _ -> raise (InvalidPragma x)
 
 (* -------------------------------------------------------------------- *)
+module Loader : sig
+  type loader
+
+  type kind  = EcLoader.kind
+  type idx_t = EcLoader.idx_t
+
+  val create  : unit   -> loader
+  val forsys  : loader -> loader
+  val dup     : loader -> loader
+
+  val addidir : ?system:bool -> ?recursive:bool -> string -> loader -> unit
+  val aslist  : loader -> ((bool * string) * idx_t) list
+  val locate  : ?onlysys:bool -> string -> loader -> (string * kind) option
+
+  val push      : string -> loader -> unit
+  val pop       : loader -> string option
+  val context   : loader -> string list
+  val incontext : string -> loader -> bool
+end = struct
+  type loader = {
+    (*---*) ld_core  : EcLoader.ecloader;
+    mutable ld_stack : string list;
+  }
+
+  type kind  = EcLoader.kind
+  type idx_t = EcLoader.idx_t
+
+  module Path = BatPathGen.OfString
+
+  let norm p =
+    try  Path.s (Path.normalize_in_tree (Path.p p))
+    with Path.Malformed_path -> p
+
+  let create () =
+    { ld_core  = EcLoader.create ();
+      ld_stack = []; }
+
+  let forsys (ld : loader) =
+    { ld_core  = EcLoader.forsys ld.ld_core;
+      ld_stack = ld.ld_stack; }
+
+  let dup (ld : loader) =
+    { ld_core  = EcLoader.dup ld.ld_core;
+      ld_stack = ld.ld_stack; }
+
+  let addidir ?system ?recursive (path : string) (ld : loader) =
+    EcLoader.addidir ?system ?recursive path ld.ld_core
+
+  let aslist (ld : loader) =
+    EcLoader.aslist ld.ld_core
+
+  let locate ?onlysys (path : string) (ld : loader) =
+    EcLoader.locate ?onlysys path ld.ld_core
+
+  let push (p : string) (ld : loader) =
+    ld.ld_stack <- norm p :: ld.ld_stack
+
+  let pop (ld : loader) =
+    match ld.ld_stack with
+    | [] -> None
+    | p :: tl -> ld.ld_stack <- tl; Some p
+
+  let context (ld : loader) =
+    ld.ld_stack
+
+  let incontext (p : string) (ld : loader) =
+    List.mem (norm p) ld.ld_stack
+end
+
+(* -------------------------------------------------------------------- *)
 let process_search scope qs =
   EcScope.Search.search scope qs
 
 (* -------------------------------------------------------------------- *)
-module ObjectInfo = struct
-  exception NoObject
+module HiPrinting = struct
+  let pr_glob fmt env pm =
+    let ppe = EcPrinting.PPEnv.ofenv env in
+    let (p, _) = EcTyping.trans_msymbol env pm in
+    let us = EcEnv.NormMp.mod_use env p in
 
-  (* ------------------------------------------------------------------ *)
-  type 'a objdump = {
-    od_name    : string;
-    od_lookup  : EcSymbols.qsymbol -> EcEnv.env -> 'a;
-    od_printer : EcPrinting.PPEnv.t -> Format.formatter -> 'a -> unit;
-  }
+    Format.fprintf fmt "Globals [# = %d]:@."
+      (Sid.cardinal us.EcEnv.us_gl);
+    Sid.iter (fun id ->
+      Format.fprintf fmt "  %s@." (EcIdent.name id))
+      us.EcEnv.us_gl;
 
-  (* -------------------------------------------------------------------- *)
-  let pr_gen_r ?(prcat = false) dumper = fun fmt env qs ->
-    try
-      let ppe = EcPrinting.PPEnv.ofenv env in
-      let obj = dumper.od_lookup qs env in
-      if prcat then
-        Format.fprintf fmt "* In [%s]:@\n@." dumper.od_name;
-      Format.fprintf fmt "%a@\n@." (dumper.od_printer ppe) obj
+    Format.fprintf fmt "@.";
 
-    with EcEnv.LookupFailure _ -> raise NoObject
+    Format.fprintf fmt "Prog. variables [# = %d]:@."
+      (Mx.cardinal us.EcEnv.us_pv);
+    List.iter (fun (xp,_) ->
+      let pv = EcTypes.pv_glob xp in
+      let ty = EcEnv.Var.by_xpath xp env in
+      Format.fprintf fmt "  @[%a : %a@]@."
+        (EcPrinting.pp_pv ppe) pv
+        (EcPrinting.pp_type ppe) ty.EcEnv.vb_type)
+      (List.rev (Mx.bindings us.EcEnv.us_pv))
 
-  (* -------------------------------------------------------------------- *)
-  let pr_gen dumper =
-    let theprinter = pr_gen_r dumper in
 
-    fun fmt env qs ->
-      try
-        theprinter fmt env qs
-      with NoObject ->
-        Format.fprintf fmt
-          "no such object in the category [%s]@." dumper.od_name
+  let pr_goal fmt scope n =
+    match EcScope.xgoal scope with
+    | None | Some { EcScope.puc_active = None} ->
+        EcScope.hierror "no active proof"
 
-  (* ------------------------------------------------------------------ *)
-  let pr_ty_r =
-    { od_name    = "type declarations";
-      od_lookup  = EcEnv.Ty.lookup;
-      od_printer = EcPrinting.pp_typedecl; }
+    | Some { EcScope.puc_active = Some (puc, _) } -> begin
+        match puc.EcScope.puc_jdg with
+        | EcScope.PSNoCheck -> ()
 
-  let pr_ty = pr_gen pr_ty_r
+        | EcScope.PSCheck pf -> begin
+            let hds = EcCoreGoal.all_hd_opened pf in
+            let sz  = List.length hds in
+            let ppe = EcPrinting.PPEnv.ofenv (EcScope.env scope) in
 
-  (* ------------------------------------------------------------------ *)
-  let pr_op_r =
-    let get_ops qs env =
-      let l = EcEnv.Op.all qs env in
-      if l = [] then raise NoObject;
-      l in
-    { od_name    = "operators or predicates";
-      od_lookup  = get_ops;
-      od_printer = 
-        fun ppe fmt l ->
-          Format.fprintf fmt "@[<v>%a@]"
-            (EcPrinting.pp_list "@ " (EcPrinting.pp_opdecl ~long:true ppe)) l; }
+            if n > sz then
+              EcScope.hierror "only %n goal(s) remaining" sz;
+            if n <= 0 then
+              EcScope.hierror "goal ID must be positive";
+            let penv = EcCoreGoal.proofenv_of_proof pf in
+            let goal = List.nth hds (n-1) in
+            let goal = EcCoreGoal.FApi.get_pregoal_by_id goal penv in
+            let goal = (EcEnv.LDecl.tohyps goal.EcCoreGoal.g_hyps,
+                        goal.EcCoreGoal.g_concl) in
 
-  let pr_op = pr_gen pr_op_r
-
-  (* ------------------------------------------------------------------ *)
-  let pr_th_r =
-    { od_name    = "theories";
-      od_lookup  = EcEnv.Theory.lookup ~mode:`All;
-      od_printer = EcPrinting.pp_theory; }
-
-  let pr_th = pr_gen pr_th_r
-
-  (* ------------------------------------------------------------------ *)
-  let pr_ax_r =
-    let get_ops qs env =
-      let l = EcEnv.Ax.all ~name:qs env in
-      if l = [] then raise NoObject;
-      l in
-    { od_name    = "lemmas or axioms";
-      od_lookup  = get_ops;
-      od_printer = 
-        fun ppe fmt l ->
-          Format.fprintf fmt "@[<v>%a@]"
-            (EcPrinting.pp_list "@ " (EcPrinting.pp_axiom ~long:true ppe)) l; }
-
-  let pr_ax = pr_gen pr_ax_r
-
-  (* ------------------------------------------------------------------ *)
-  let pr_mod_r =
-    { od_name    = "modules";
-      od_lookup  = EcEnv.Mod.lookup;
-      od_printer = (fun ppe fmt (_, me) -> EcPrinting.pp_modexp ppe fmt me); }
-
-  let pr_mod = pr_gen pr_mod_r
-
-  (* ------------------------------------------------------------------ *)
-  let pr_mty_r =
-    { od_name    = "module types";
-      od_lookup  = EcEnv.ModTy.lookup;
-      od_printer = EcPrinting.pp_modsig; }
-
-  let pr_mty = pr_gen pr_mty_r
-
-  (* ------------------------------------------------------------------ *)
-  let pr_any fmt env qs =
-    let printers = [pr_gen_r ~prcat:true pr_ty_r ;
-                    pr_gen_r ~prcat:true pr_op_r ;
-                    pr_gen_r ~prcat:true pr_th_r ;
-                    pr_gen_r ~prcat:true pr_ax_r ;
-                    pr_gen_r ~prcat:true pr_mod_r;
-                    pr_gen_r ~prcat:true pr_mty_r; ] in
-
-    let ok = ref (List.length printers) in
-
-    List.iter
-      (fun f -> try f fmt env qs with NoObject -> decr ok)
-      printers;
-    if !ok = 0 then
-      Format.fprintf fmt "%s@." "no such object in any category"
+            Format.fprintf fmt "Printing Goal %d\n\n%!" n;
+            EcPrinting.pp_goal ppe fmt (goal, `One sz)
+        end
+    end
 end
 
 (* -------------------------------------------------------------------- *)
@@ -185,75 +205,33 @@ let process_pr fmt scope p =
   let env = EcScope.env scope in
 
   match p with
-  | Pr_ty   qs -> ObjectInfo.pr_ty  fmt env qs.pl_desc
-  | Pr_op   qs -> ObjectInfo.pr_op  fmt env qs.pl_desc
-  | Pr_pr   qs -> ObjectInfo.pr_op  fmt env qs.pl_desc
-  | Pr_th   qs -> ObjectInfo.pr_th  fmt env qs.pl_desc
-  | Pr_ax   qs -> ObjectInfo.pr_ax  fmt env qs.pl_desc
-  | Pr_mod  qs -> ObjectInfo.pr_mod fmt env qs.pl_desc
-  | Pr_mty  qs -> ObjectInfo.pr_mty fmt env qs.pl_desc
-  | Pr_any  qs -> ObjectInfo.pr_any fmt env qs.pl_desc
+  | Pr_ty   qs -> EcPrinting.ObjectInfo.pr_ty   fmt env   qs.pl_desc
+  | Pr_op   qs -> EcPrinting.ObjectInfo.pr_op   fmt env   qs.pl_desc
+  | Pr_pr   qs -> EcPrinting.ObjectInfo.pr_op   fmt env   qs.pl_desc
+  | Pr_th   qs -> EcPrinting.ObjectInfo.pr_th   fmt env   qs.pl_desc
+  | Pr_ax   qs -> EcPrinting.ObjectInfo.pr_ax   fmt env   qs.pl_desc
+  | Pr_mod  qs -> EcPrinting.ObjectInfo.pr_mod  fmt env   qs.pl_desc
+  | Pr_mty  qs -> EcPrinting.ObjectInfo.pr_mty  fmt env   qs.pl_desc
+  | Pr_any  qs -> EcPrinting.ObjectInfo.pr_any  fmt env   qs.pl_desc
 
-  | Pr_glob pm -> begin
-      let ppe = EcPrinting.PPEnv.ofenv env in
-      let (p, _) = EcTyping.trans_msymbol env pm in
-      let us = EcEnv.NormMp.mod_use env p in
-  
-      Format.fprintf fmt "Globals [# = %d]:@."
-        (Sid.cardinal us.EcEnv.us_gl);
-      Sid.iter (fun id ->
-        Format.fprintf fmt "  %s@." (EcIdent.name id))
-        us.EcEnv.us_gl;
-  
-      Format.fprintf fmt "@.";
-  
-      Format.fprintf fmt "Prog. variables [# = %d]:@."
-        (Mx.cardinal us.EcEnv.us_pv);
-      List.iter (fun (xp,_) ->
-        let pv = EcTypes.pv_glob xp in
-        let ty = EcEnv.Var.by_xpath xp env in
-        Format.fprintf fmt "  @[%a : %a@]@."
-          (EcPrinting.pp_pv ppe) pv
-          (EcPrinting.pp_type ppe) ty.EcEnv.vb_type)
-        (List.rev (Mx.bindings us.EcEnv.us_pv))
-  end
+  | Pr_glob pm -> HiPrinting.pr_glob fmt env pm
+  | Pr_goal n  -> HiPrinting.pr_goal fmt scope n
 
-  | Pr_goal n -> begin
-      match EcScope.xgoal scope with
-      | None | Some { EcScope.puc_active = None} ->
-          EcScope.hierror "no active proof"
-
-      | Some { EcScope.puc_active = Some puc } -> begin
-          match puc.EcScope.puc_jdg with
-          | EcScope.PSNoCheck -> ()
-
-          | EcScope.PSCheck pf -> begin
-              let hds = EcCoreGoal.all_hd_opened pf in
-              let sz  = List.length hds in
-              let ppe = EcPrinting.PPEnv.ofenv (EcScope.env scope) in
-
-              if n > sz then
-                EcScope.hierror "only %n goal(s) remaining" sz;
-              if n <= 0 then
-                EcScope.hierror "goal ID must be positive";
-              let penv = EcCoreGoal.proofenv_of_proof pf in
-              let goal = List.nth hds (n-1) in
-              let goal = EcCoreGoal.FApi.get_pregoal_by_id goal penv in
-              let goal = (EcEnv.LDecl.tohyps goal.EcCoreGoal.g_hyps,
-                          goal.EcCoreGoal.g_concl) in
-
-              Format.fprintf fmt "Printing Goal %d\n\n%!" n;
-              EcPrinting.pp_goal ppe fmt (goal, `One sz)
-          end
-      end
-  end
+(* -------------------------------------------------------------------- *)
+let check_opname_validity (scope : EcScope.scope) (x : string) =
+  if EcIo.is_binop x = `Invalid then
+    EcScope.notify scope `Warning
+      "operator `%s' cannot be used in prefix mode" x;
+  if EcIo.is_uniop x = `Invalid then
+    EcScope.notify scope `Warning
+      "operator `%s' cannot be used in infix mode" x
 
 (* -------------------------------------------------------------------- *)
 let process_print scope p =
   process_pr Format.std_formatter scope p
 
 (* -------------------------------------------------------------------- *)
-exception Pragma of [`Reset]
+exception Pragma of [`Reset | `Restart]
 
 (* -------------------------------------------------------------------- *)
 let rec process_type (scope : EcScope.scope) (tyd : ptydecl located) =
@@ -305,28 +283,43 @@ and process_interface (scope : EcScope.scope) (x, i) =
   EcScope.ModType.add scope x.pl_desc i
 
 (* -------------------------------------------------------------------- *)
-and process_operator (scope : EcScope.scope) (op : poperator located) =
+and process_operator (scope : EcScope.scope) (pop : poperator located) =
   EcScope.check_state `InTop "operator" scope;
-  let scope = EcScope.Op.add scope op in
-    List.iter
-      (fun { pl_desc = name } ->
-        EcScope.notify scope `Info "added operator: `%s'" name)
-      (op.pl_desc.po_name :: op.pl_desc.po_aliases);
+  let op, scope = EcScope.Op.add scope pop in
+  let ppe = EcPrinting.PPEnv.ofenv (EcScope.env scope) in
+  List.iter
+    (fun { pl_desc = name } ->
+      EcScope.notify scope `Info "added operator %s %a"
+        name (EcPrinting.pp_added_op ppe) op;
+        check_opname_validity scope name)
+      (pop.pl_desc.po_name :: pop.pl_desc.po_aliases);
     scope
 
 (* -------------------------------------------------------------------- *)
 and process_predicate (scope : EcScope.scope) (p : ppredicate located) =
   EcScope.check_state `InTop "predicate" scope;
-  let scope = EcScope.Pred.add scope p in
-    EcScope.notify scope `Info "added predicate: `%s'" (unloc p.pl_desc.pp_name);
+  let op, scope = EcScope.Pred.add scope p in
+  let ppe = EcPrinting.PPEnv.ofenv (EcScope.env scope) in
+  EcScope.notify scope `Info "added predicate %s %a"
+    (unloc p.pl_desc.pp_name) (EcPrinting.pp_added_op ppe) op;
+  check_opname_validity scope (unloc p.pl_desc.pp_name);
     scope
 
 (* -------------------------------------------------------------------- *)
-and process_choice (scope : EcScope.scope) (c : pchoice located) =
-  EcScope.check_state `InTop "choice" scope;
-  let scope = EcScope.Op.add_choiceop scope c in
-    EcScope.notify scope `Info "added choice operator: `%s'" (unloc c.pl_desc.pc_name);
-    scope                                 (* FIXME *)
+and process_notation (scope : EcScope.scope) (n : pnotation located) =
+  EcScope.check_state `InTop "notation" scope;
+  let scope = EcScope.Notations.add scope n in
+    EcScope.notify scope `Info "added notation: `%s'"
+      (unloc n.pl_desc.nt_name);
+    scope
+
+(* -------------------------------------------------------------------- *)
+and process_abbrev (scope : EcScope.scope) (a : pabbrev located) =
+  EcScope.check_state `InTop "abbreviation" scope;
+  let scope = EcScope.Notations.add_abbrev scope a in
+    EcScope.notify scope `Info "added abbrev.: `%s'"
+      (unloc a.pl_desc.ab_name);
+    scope
 
 (* -------------------------------------------------------------------- *)
 and process_axiom (scope : EcScope.scope) (ax : paxiom located) =
@@ -345,28 +338,38 @@ and process_th_open (scope : EcScope.scope) (abs, name) =
   EcScope.Theory.enter scope (if abs then `Abstract else `Concrete) name
 
 (* -------------------------------------------------------------------- *)
-and process_th_close (scope : EcScope.scope) name =
+and process_th_close (scope : EcScope.scope) (clears, name) =
+  let name = unloc name in
   EcScope.check_state `InTop "theory closing" scope;
   if (fst (EcScope.name scope)) <> name then
     EcScope.hierror
       "active theory has name `%s', not `%s'"
       (fst (EcScope.name scope)) name;
-  snd (EcScope.Theory.exit scope)
+  snd (EcScope.Theory.exit ~clears scope)
+
+(* -------------------------------------------------------------------- *)
+and process_th_clear (scope : EcScope.scope) clears =
+  EcScope.check_state `InTop "theory clear" scope;
+  EcScope.Theory.add_clears clears scope
 
 (* -------------------------------------------------------------------- *)
 and process_th_require1 ld scope (x, io) =
   EcScope.check_state `InTop "theory require" scope;
 
   let name  = x.pl_desc in
-    match EcLoader.locate name ld with
+    match Loader.locate name ld with
     | None ->
         EcScope.hierror "cannot locate theory `%s'" name
 
     | Some (filename, kind) ->
-        let dirname = Filename.dirname filename in
-        let subld   = EcLoader.dup ld in
+        if Loader.incontext filename ld then
+          EcScope.hierror "circular requires involving `%s'" name;
 
-        EcLoader.addidir dirname subld;
+        let dirname = Filename.dirname filename in
+        let subld   = Loader.dup ld in
+
+        Loader.push    filename subld;
+        Loader.addidir dirname  subld;
 
         let loader iscope =
           let i_pragma = !pragma in
@@ -409,11 +412,6 @@ and process_th_clone (scope : EcScope.scope) thcl =
   EcScope.Cloning.clone scope (!pragma).pm_check thcl
 
 (* -------------------------------------------------------------------- *)
-and process_w3_import (scope : EcScope.scope) (p, f, r) =
-  EcScope.check_state `InTop "why3 import" scope;
-  EcScope.Theory.import_w3 scope p f r
-
-(* -------------------------------------------------------------------- *)
 and process_sct_open (scope : EcScope.scope) name =
   EcScope.check_state `InTop "section opening" scope;
   EcScope.Section.enter scope name
@@ -427,19 +425,28 @@ and process_sct_close (scope : EcScope.scope) name =
 and process_tactics (scope : EcScope.scope) t =
   let mode = !pragma.pm_check in
   match t with
-  | `Actual t  -> EcScope.Tactics.process scope mode t
+  | `Actual t  -> snd (EcScope.Tactics.process scope mode t)
   | `Proof  pm -> EcScope.Tactics.proof   scope mode pm.pm_strict
 
 (* -------------------------------------------------------------------- *)
-and process_save (scope : EcScope.scope) loc =
-  let (name, scope) = EcScope.Ax.save scope loc in
-    name |> EcUtils.oiter
+and process_save (scope : EcScope.scope) ed =
+  let (oname, scope) =
+    match unloc ed with
+    | `Qed   -> EcScope.Ax.save  scope
+    | `Admit -> EcScope.Ax.admit scope
+    | `Abort -> (None, EcScope.Ax.abort scope)
+  in
+    oname |> EcUtils.oiter
       (fun x -> EcScope.notify scope `Info "added lemma: `%s'" x);
     scope
 
 (* -------------------------------------------------------------------- *)
-and process_realize (scope : EcScope.scope) name =
-  EcScope.Ax.activate scope name
+and process_realize (scope : EcScope.scope) pr =
+  let mode = !pragma.pm_check in
+  let (name, scope) = EcScope.Ax.realize scope mode pr in
+    name |> EcUtils.oiter
+      (fun x -> EcScope.notify scope `Info "added lemma: `%s'" x);
+    scope
 
 (* -------------------------------------------------------------------- *)
 and process_proverinfo scope pi =
@@ -467,22 +474,80 @@ and process_pragma (scope : EcScope.scope) opt =
   | "noop"    -> ()
   | "compact" -> Gc.compact ()
   | "reset"   -> raise (Pragma `Reset)
+  | "restart" -> raise (Pragma `Restart)
   | _         -> ()
 
 (* -------------------------------------------------------------------- *)
 and process_option (scope : EcScope.scope) (name, value) =
-  match unloc name with
-  | "implicits" ->
-      EcScope.Options.set_implicits scope value
-
-  | _ -> EcScope.hierror "unknown option: %s" (unloc name)
+  try  EcScope.Options.set scope (unloc name) value
+  with EcScope.UnknownFlag _ ->
+    EcScope.hierror "unknown option: %s" (unloc name)
 
 (* -------------------------------------------------------------------- *)
-and process_addrw scope todo =
-  EcScope.BaseRw.process_addrw scope todo
+and process_addrw scope baserw =
+  EcScope.Auto.addrw scope baserw
 
 (* -------------------------------------------------------------------- *)
-and process (ld : EcLoader.ecloader) (scope : EcScope.scope) g =
+and process_addat scope base =
+  EcScope.Auto.addat scope base
+
+(* -------------------------------------------------------------------- *)
+and process_dump_why3 scope filename =
+  EcScope.dump_why3 scope filename; scope
+
+(* -------------------------------------------------------------------- *)
+and process_dump scope (source, tc) =
+  let open EcCoreGoal in
+
+  let input, (p1, p2) = source.tcd_source in
+
+  let goals, scope  =
+    let mode = !pragma.pm_check in
+     EcScope.Tactics.process scope mode tc
+  in
+
+  let wrerror fname =
+    EcScope.notify scope `Warning "cannot write `%s'" fname in
+
+  let tactic =
+    try  File.read_from_file ~offset:p1 ~length:(p2-p1) input
+    with Invalid_argument _ -> "(* failed to read back script *)" in
+  let tactic = Printf.sprintf "%s.\n" (String.strip tactic) in
+
+  let ecfname = Printf.sprintf "%s.ec" source.tcd_output in
+
+  (try  File.write_to_file ~output:ecfname tactic
+   with Invalid_argument _ -> wrerror ecfname);
+
+  goals |> oiter (fun (penv, (hd, hds)) ->
+    let goals =
+      List.map
+        (fun hd -> EcCoreGoal.FApi.get_pregoal_by_id hd penv)
+        (hd :: hds) in
+
+    List.iteri (fun i { g_hyps = hyps; g_concl = concl; } ->
+        let ecfname = Printf.sprintf "%s.%d.ec" source.tcd_output i in
+
+        try
+          let output  = open_out_bin ecfname in
+
+          try_finally
+            (fun () ->
+              let fbuf = Format.formatter_of_out_channel output in
+              let ppe  = EcPrinting.PPEnv.ofenv (EcEnv.LDecl.toenv hyps) in
+
+              source.tcd_width |> oiter (Format.pp_set_margin fbuf);
+
+              Format.fprintf fbuf "%a@?" (EcPrinting.pp_goal ppe)
+                ((EcEnv.LDecl.tohyps hyps, concl), `One (-1)))
+            (fun () -> close_out output)
+        with Sys_error _ -> wrerror ecfname)
+      goals);
+
+  scope
+
+(* -------------------------------------------------------------------- *)
+and process (ld : Loader.loader) (scope : EcScope.scope) g =
   let loc = g.pl_loc in
 
   let scope =
@@ -496,26 +561,30 @@ and process (ld : EcLoader.ecloader) (scope : EcScope.scope) g =
       | Ginterface   i    -> `Fct   (fun scope -> process_interface  scope  i)
       | Goperator    o    -> `Fct   (fun scope -> process_operator   scope  (mk_loc loc o))
       | Gpredicate   p    -> `Fct   (fun scope -> process_predicate  scope  (mk_loc loc p))
-      | Gchoice      c    -> `Fct   (fun scope -> process_choice     scope  (mk_loc loc c))
+      | Gnotation    n    -> `Fct   (fun scope -> process_notation   scope  (mk_loc loc n))
+      | Gabbrev      n    -> `Fct   (fun scope -> process_abbrev     scope  (mk_loc loc n))
       | Gaxiom       a    -> `Fct   (fun scope -> process_axiom      scope  (mk_loc loc a))
       | GthOpen      name -> `Fct   (fun scope -> process_th_open    scope  (snd_map unloc name))
-      | GthClose     name -> `Fct   (fun scope -> process_th_close   scope  name.pl_desc)
+      | GthClose     info -> `Fct   (fun scope -> process_th_close   scope  info)
+      | GthClear     info -> `Fct   (fun scope -> process_th_clear   scope  info)
       | GthRequire   name -> `Fct   (fun scope -> process_th_require ld scope name)
       | GthImport    name -> `Fct   (fun scope -> process_th_import  scope  name)
       | GthExport    name -> `Fct   (fun scope -> process_th_export  scope  name)
       | GthClone     thcl -> `Fct   (fun scope -> process_th_clone   scope  thcl)
       | GsctOpen     name -> `Fct   (fun scope -> process_sct_open   scope  name)
       | GsctClose    name -> `Fct   (fun scope -> process_sct_close  scope  name)
-      | GthW3        a    -> `Fct   (fun scope -> process_w3_import  scope  a)
       | Gprint       p    -> `Fct   (fun scope -> process_print      scope  p; scope)
       | Gsearch      qs   -> `Fct   (fun scope -> process_search     scope  qs; scope)
       | Gtactics     t    -> `Fct   (fun scope -> process_tactics    scope  t)
+      | Gtcdump      info -> `Fct   (fun scope -> process_dump       scope  info)
       | Grealize     p    -> `Fct   (fun scope -> process_realize    scope  p)
       | Gprover_info pi   -> `Fct   (fun scope -> process_proverinfo scope  pi)
-      | Gsave        loc  -> `Fct   (fun scope -> process_save       scope  loc)
+      | Gsave        ed   -> `Fct   (fun scope -> process_save       scope  ed)
       | Gpragma      opt  -> `State (fun scope -> process_pragma     scope  opt)
       | Goption      opt  -> `Fct   (fun scope -> process_option     scope  opt)
       | Gaddrw       hint -> `Fct   (fun scope -> process_addrw      scope hint)
+      | Gaddat       hint -> `Fct   (fun scope -> process_addat      scope hint)
+      | GdumpWhy3    file -> `Fct   (fun scope -> process_dump_why3  scope file)
     with
     | `Fct   f -> Some (f scope)
     | `State f -> f scope; None
@@ -528,13 +597,13 @@ and process_internal ld scope g =
   with e -> raise (EcScope.toperror_of_exn ~gloc:(loc g.gl_action) e)
 
 (* -------------------------------------------------------------------- *)
-let loader = EcLoader.create ()
+let loader = Loader.create ()
 
 let addidir ?system ?recursive (idir : string) =
-  EcLoader.addidir ?system ?recursive idir loader
+  Loader.addidir ?system ?recursive idir loader
 
 let loadpath () =
-  List.map fst (EcLoader.aslist loader)
+  List.map fst (Loader.aslist loader)
 
 (* -------------------------------------------------------------------- *)
 type checkmode = {
@@ -545,7 +614,6 @@ type checkmode = {
   cm_provers   : string list option;
   cm_wrapper   : string option;
   cm_profile   : bool;
-  cm_oldsmt    : bool;
   cm_iterate   : bool;
 }
 
@@ -558,15 +626,15 @@ let initial ~checkmode ~boot =
     EcScope.Prover.po_cpufactor = Some checkmode.cm_cpufactor;
     EcScope.Prover.po_nprovers  = Some checkmode.cm_nprovers;
     EcScope.Prover.po_provers   = (checkmode.cm_provers, []);
-    EcScope.Prover.po_version   = 
-      if checkmode.cm_oldsmt then Some `Full else Some `Lazy;
     EcScope.Prover.pl_iterate   = Some (checkmode.cm_iterate);
   } in
 
+  let perv    = (mk_loc _dummy EcCoreLib.i_Pervasive, Some `Export) in
   let prelude = (mk_loc _dummy "Prelude", Some `Export) in
-  let loader  = EcLoader.forsys loader in
+  let loader  = Loader.forsys loader in
   let gstate  = EcGState.from_flags [("profile", profile)] in
   let scope   = EcScope.empty gstate in
+  let scope   = process_th_require1 loader scope perv in
   let scope   = if boot then scope else process_th_require1 loader scope prelude in
 
   let scope = EcScope.Prover.set_wrapper scope wrapper in
@@ -611,8 +679,9 @@ let push_context scope context =
       |> omap (fun st -> context.ct_current :: st); }
 
 (* -------------------------------------------------------------------- *)
-let initialize ~undo ~boot ~checkmode =
-  assert (!context = None);
+let initialize ~restart ~undo ~boot ~checkmode =
+  assert (restart || EcUtils.is_none !context);
+  if restart then pragma := dpragma;
   context := Some (rootctxt ~undo (initial ~checkmode ~boot))
 
 (* -------------------------------------------------------------------- *)
@@ -660,8 +729,9 @@ let process ?(timed = false) (g : global_action located) : unit =
     oscope |> oiter (fun scope -> context := Some (push_context scope current));
     if tdelta >= 0. then
       EcScope.notify scope `Info "time: %f" tdelta
-  with Pragma `Reset ->
-    reset ()
+  with
+  | Pragma `Reset   -> reset ()
+  | Pragma `Restart -> raise Restart
 
 (* -------------------------------------------------------------------- *)
 module S = EcScope
@@ -680,10 +750,10 @@ let pp_current_goal ?(all = false) stream =
            let ppe = EcPrinting.PPEnv.ofenv env in
            Format.fprintf stream " %s: %a@\n%!"
              (EcPath.tostring p)
-             (EcPrinting.pp_form ppe) (oget ax.EcDecl.ax_spec))
+             (EcPrinting.pp_form ppe) ax.EcDecl.ax_spec)
         (fst ct)
 
-  | Some { S.puc_active = Some puc } -> begin
+  | Some { S.puc_active = Some (puc, _) } -> begin
       match puc.S.puc_jdg with
       | S.PSNoCheck -> ()
 

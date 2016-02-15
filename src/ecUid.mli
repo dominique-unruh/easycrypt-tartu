@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -30,6 +32,7 @@ module NameGen : sig
   type t
 
   val ofint  : int -> string
+  val bulk   : ?fmt:(string -> string) -> int -> string list
   val create : unit -> t
   val get    : t -> uid -> string
 end

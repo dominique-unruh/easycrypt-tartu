@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -27,6 +29,10 @@ type lazyred = EcProofTyping.lazyred
 val (@!) : FApi.backward -> FApi.backward -> FApi.backward
 val (@+) : FApi.backward -> FApi.backward list -> FApi.backward
 
+val (@~)  : FApi.backward -> FApi.tactical -> FApi.backward
+val (@!+) : FApi.tactical -> FApi.backward -> FApi.tactical
+val (@~+) : FApi.tactical -> FApi.backward list -> FApi.tactical
+
 val t_admit : FApi.backward
 val t_true  : FApi.backward
 val t_fail  : FApi.backward
@@ -38,14 +44,18 @@ val alpha_find_in_hyps : EcEnv.LDecl.hyps -> EcFol.form -> EcIdent.t
 val t_assumption       : [`Alpha | `Conv] -> FApi.backward
 val t_absurd_hyp       : ?conv:xconv -> ?id:EcIdent.t -> FApi.backward
 val t_logic_trivial    : FApi.backward
-val t_trivial          : FApi.backward option -> FApi.backward
+val t_trivial          : ?subtc:FApi.backward -> FApi.backward
 
 (* -------------------------------------------------------------------- *)
-val t_simplify : ?delta:bool -> FApi.backward
-val t_simplify_with_info : reduction_info -> FApi.backward
+val t_simplify :
+     ?target:ident -> ?delta:bool -> ?logic:rlogic_info
+  -> FApi.backward
+
+val t_simplify_with_info :
+  ?target:ident -> reduction_info -> FApi.backward
 
 (* -------------------------------------------------------------------- *)
-val t_change : form -> tcenv1 -> tcenv1
+val t_change : ?target:ident -> form -> tcenv1 -> tcenv1
 
 (* -------------------------------------------------------------------- *)
 val t_reflex       : ?reduce:lazyred -> FApi.backward
@@ -54,7 +64,10 @@ val t_symmetry     : ?reduce:lazyred -> FApi.backward
 
 (* -------------------------------------------------------------------- *)
 module LowApply : sig
-  type ckenv = [`Tc of rtcenv | `Hyps of EcEnv.LDecl.hyps * proofenv]
+  type ckenv = [
+    | `Tc   of rtcenv * ident option
+    | `Hyps of EcEnv.LDecl.hyps * proofenv
+  ]
 
   val check : [`Elim | `Intro] -> proofterm -> ckenv -> proofterm * form
 end
@@ -83,6 +96,26 @@ val t_apply_hyp : EcIdent.t -> ?args:(form list) -> ?sk:int -> FApi.backward
 val t_apply_hd : handle -> ?args:(form list) -> ?sk:int -> FApi.backward
 
 (* -------------------------------------------------------------------- *)
+module Apply : sig
+  open EcMatching
+  open EcProofTerm
+
+  type reason = [`DoNotMatch | `IncompleteInference]
+
+  exception NoInstance of (bool * reason * pt_env * (form * form))
+
+  val t_apply_bwd_r :
+    ?mode:fmoptions -> ?canview:bool -> pt_ev -> FApi.backward
+
+  val t_apply_bwd :
+    ?mode:fmoptions -> ?canview:bool -> proofterm -> FApi.backward
+
+  val t_apply_bwd_hi:
+       ?dpe:bool -> ?mode:fmoptions -> ?canview:bool
+    -> proofterm -> FApi.backward
+end
+
+(* -------------------------------------------------------------------- *)
 (* Introduction of logical operators (backward). *)
 val t_or_intro_s  : [`Asym | `Sym] -> [`Left|`Right] -> form pair -> FApi.backward
 val t_and_intro_s : [`Asym | `Sym] -> form pair -> FApi.backward
@@ -95,8 +128,11 @@ val t_iff_intro : ?reduce:lazyred -> FApi.backward
 val t_left  : ?reduce:lazyred -> FApi.backward
 val t_right : ?reduce:lazyred -> FApi.backward
 
+val t_or_intro_prind : ?reduce:lazyred -> side -> FApi.backward
+
 (* -------------------------------------------------------------------- *)
 val t_split : ?closeonly:bool -> ?reduce:lazyred -> FApi.backward
+val t_split_prind : ?reduce:lazyred -> FApi.backward
 
 (* -------------------------------------------------------------------- *)
 val t_exists_intro_s : pt_arg list -> FApi.backward
@@ -107,17 +143,19 @@ val t_tuple_intro   : ?reduce:lazyred -> FApi.backward
 
 (* -------------------------------------------------------------------- *)
 (* Elimination of logical operators (backward). The top-level
- * assumption is the one that is searched for eliminiation. Do a
+ * assumption is the one that is searched for elimination. Do a
  * generalization first if needed. *)
-val t_elim_false    : FApi.backward
-val t_elim_and      : FApi.backward
-val t_elim_or       : FApi.backward
-val t_elim_if       : FApi.backward
-val t_elim_iff      : FApi.backward
-val t_elim_eq_tuple : FApi.backward
-val t_elim_exists   : FApi.backward
+val t_elim_false    : ?reduce:lazyred -> FApi.backward
+val t_elim_and      : ?reduce:lazyred -> FApi.backward
+val t_elim_or       : ?reduce:lazyred -> FApi.backward
+val t_elim_if       : ?reduce:lazyred -> FApi.backward
+val t_elim_iff      : ?reduce:lazyred -> FApi.backward
+val t_elim_eq_tuple : ?reduce:lazyred -> FApi.backward
+val t_elim_exists   : ?reduce:lazyred -> FApi.backward
 val t_elim          : ?reduce:lazyred -> FApi.backward
 val t_elim_hyp      : EcIdent.t -> FApi.backward
+val t_elim_prind    : ?reduce:lazyred -> [ `Case | `Ind ] -> FApi.backward
+val t_elim_iso_and  : ?reduce:lazyred -> tcenv1 -> int * tcenv
 
 (* Elimination using an custom elimination principle. *)
 val t_elimT_form : proofterm -> ?sk:int -> form -> FApi.backward
@@ -152,9 +190,15 @@ val  full_subst_kind : subst_kind
 val empty_subst_kind : subst_kind
 
 type rwspec = [`LtoR|`RtoL] * ptnpos option
+type rwmode = [`Bool | `Eq]
 
-val t_rewrite     : proofterm -> rwspec -> FApi.backward
-val t_rewrite_hyp : EcIdent.t -> rwspec -> FApi.backward
+val t_rewrite :
+     ?xconv:xconv -> ?target:ident -> ?mode:rwmode
+  -> proofterm -> rwspec -> FApi.backward
+
+val t_rewrite_hyp :
+     ?xconv:xconv -> ?mode:rwmode -> EcIdent.t
+  -> rwspec -> FApi.backward
 
 type tside = [`All | `LtoR | `RtoL]
 
@@ -183,12 +227,30 @@ val t_intros_i_seq : ?clear:bool -> ident list -> FApi.backward -> FApi.backward
 val t_intros_s_seq : inames -> FApi.backward -> FApi.backward
 
 (* -------------------------------------------------------------------- *)
-val t_generalize_hyps : ?clear:bool -> EcIdent.t list -> FApi.backward
-val t_generalize_hyp  : ?clear:bool -> EcIdent.t -> FApi.backward
+type genclear = [`Clear | `TryClear | `NoClear]
+
+val t_generalize_hyps_x :
+     ?missing:bool
+  -> ?naming:(ident -> symbol option)
+  -> (genclear * EcIdent.t) list
+  -> FApi.backward
+
+val t_generalize_hyps :
+     ?clear:[`Yes|`No|`Try] -> ?missing:bool
+  -> ?naming:(ident -> symbol option)
+  -> EcIdent.t list -> FApi.backward
+
+val t_generalize_hyp  :
+     ?clear:[`Yes|`No|`Try] -> ?missing:bool
+  -> ?naming:(ident -> symbol option)
+  -> EcIdent.t -> FApi.backward
 
 (* -------------------------------------------------------------------- *)
-val t_clear  : ident -> FApi.backward
-val t_clears : ident list -> FApi.backward
+val t_clear1  : ?leniant:bool -> ident -> tcenv1 -> tcenv1
+val t_clears1 : ?leniant:bool -> ident list -> tcenv1 -> tcenv1
+
+val t_clear  : ?leniant:bool -> ident -> FApi.backward
+val t_clears : ?leniant:bool -> ident list -> FApi.backward
 
 (* -------------------------------------------------------------------- *)
 type pgoptions =  {
@@ -209,19 +271,17 @@ module PGOptions : sig
   val merge   : pgoptions -> ppgoptions -> pgoptions
 end
 
-val t_progress : 
-     ?options:pgoptions -> 
+val t_progress :
+     ?options:pgoptions ->
      ?ti:(EcIdent.t -> EcCoreGoal.FApi.backward) ->
      FApi.backward -> FApi.backward
+
+val t_crush : ?delta:bool -> FApi.backward
 
 (* -------------------------------------------------------------------- *)
 val t_congr : form pair -> form pair list * ty -> FApi.backward
 
 (* -------------------------------------------------------------------- *)
-type smtmode    = [`Standard | `Strict | `Report of EcLocation.t option]
-type smtversion = [`Lazy | `Full]
+type smtmode = [`Standard | `Strict | `Report of EcLocation.t option]
 
-val t_smt:
-    mode:smtmode
- -> prover_infos
- -> FApi.backward
+val t_smt: mode:smtmode -> prover_infos -> FApi.backward

@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -30,13 +32,13 @@ end = struct
 
   let parse =
     let pop (version : string) =
-      let re = Str.regexp "^\\([0-9]+\\)[.-]?\\(.*\\)" in
-      match Str.string_match re version 0 with
-      | false -> (0, version)
-      | true  ->
-        let g1 = Str.matched_group 1 version
-        and g2 = Str.matched_group 2 version in
+      let rex = Pcre.regexp "^([0-9]+)[.-]?(.*)" in
+      try
+        let groups = Pcre.exec ~rex version in
+        let g1 = Pcre.get_substring groups 1 in
+        let g2 = Pcre.get_substring groups 2 in
         (int_of_string g1, g2)
+      with Not_found -> (0, version)
     in
 
     fun (version : string) ->
@@ -81,7 +83,7 @@ let test_if_evict_prover test (name, version) =
         | `Lt -> cmp <  0
         | `Le -> cmp <= 0
       end
-  
+
     | `ByVersion (_, _) -> false
 
   in if evict then Some test.pe_cause else None
@@ -155,7 +157,7 @@ end = struct
         let name    = p.Whyconf.prover_name in
         let version = p.Whyconf.prover_version in
         let driver  = Driver.load_driver w3_env config.Whyconf.driver [] in
-  
+
         { pr_prover  =
             { pr_name    = name;
               pr_version = version;
@@ -314,7 +316,6 @@ type prover_infos = {
   pr_cpufactor : int;
   pr_wrapper   : string option;
   pr_verbose   : int;
-  pr_version   : [`Lazy | `Full];
   pr_all       : bool;
   pr_max       : int;
   pr_iterate   : bool;
@@ -330,7 +331,6 @@ let dft_prover_infos = {
   pr_cpufactor = 1;
   pr_wrapper   = None;
   pr_verbose   = 0;
-  pr_version   = `Lazy;
   pr_all       = false;
   pr_iterate   = false;
   pr_max       = 50;
@@ -339,7 +339,6 @@ let dft_prover_infos = {
 }
 
 let dft_prover_names = ["Z3"; "CVC4"; "Alt-Ergo"; "Eprover"; "Yices"]
-
 
 (* -------------------------------------------------------------------- *)
 type notify = EcGState.loglevel -> string Lazy.t -> unit
@@ -422,7 +421,7 @@ module POSIX : PExec = struct
           (fun i prover ->
              if i < pi.pr_maxprocs then run i prover else Queue.add prover pqueue)
           pi.pr_provers;
-  
+
         (* Wait for the first prover giving a definitive answer *)
         let status = ref None in
         let alives = ref (-1) in

@@ -1,4 +1,11 @@
-; Generated on Wed Mar  4 14:39:24 2015
+;; --------------------------------------------------------------------
+;; Copyright (c) - 2012--2016 - IMDEA Software Institute
+;; Copyright (c) - 2012--2016 - Inria
+;;
+;; Distributed under the terms of the GPL-v3 license
+;; --------------------------------------------------------------------
+
+; Generated on Thu Dec 17 16:14:05 2015
 
 (defvar easycrypt-bytac-keywords '(
   "exact"
@@ -11,17 +18,17 @@
 
 (defvar easycrypt-dangerous-keywords '(
   "admit"
+  "admitted"
 ))
 
 (defvar easycrypt-global-keywords '(
   "axiom"
-  "hypothesis"
   "axiomatized"
   "lemma"
   "realize"
-  "choice"
   "proof"
   "qed"
+  "abort"
   "goal"
   "end"
   "import"
@@ -36,6 +43,8 @@
   "const"
   "op"
   "pred"
+  "notation"
+  "abbrev"
   "require"
   "theory"
   "abstract"
@@ -45,19 +54,22 @@
   "instance"
   "print"
   "search"
-  "why3"
   "as"
   "Pr"
   "clone"
   "with"
+  "rename"
   "prover"
   "timeout"
-  "nolocals"
+  "why3"
+  "dump"
+  "remove"
   "Top"
   "Self"
 ))
 
 (defvar easycrypt-internal-keywords '(
+  "time"
   "undo"
   "debug"
   "pragma"
@@ -90,6 +102,7 @@
   "beta"
   "iota"
   "zeta"
+  "eta"
   "logic"
   "delta"
   "simplify"
@@ -98,12 +111,11 @@
   "split"
   "left"
   "right"
-  "generalize"
   "case"
-  "intros"
   "pose"
   "cut"
   "have"
+  "suff"
   "elim"
   "clear"
   "apply"
@@ -116,7 +128,9 @@
   "idtac"
   "move"
   "modpath"
+  "field"
   "fieldeq"
+  "ring"
   "ringeq"
   "algebra"
   "transitivity"

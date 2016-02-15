@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -40,3 +42,8 @@ val t_conseq : form -> form -> FApi.backward
 (* -------------------------------------------------------------------- *)
 val process_conseq   : bool -> conseq_ppterm option tuple3 -> FApi.backward
 val process_bd_equiv : side -> pformula pair -> FApi.backward
+
+(* -------------------------------------------------------------------- *)
+val process_conseq_opt :
+  pcqoptions -> conseq_ppterm option tuple3 -> FApi.backward
+

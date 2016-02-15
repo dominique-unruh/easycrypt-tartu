@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -26,6 +28,7 @@ type nid_t
 type loglevel = [`Debug | `Info | `Warning | `Critical]
 
 val string_of_loglevel : loglevel -> string
+val max_loglevel : loglevel -> loglevel -> loglevel
 
 val accept_log   : level:loglevel -> wanted:loglevel -> bool
 val add_notifier : (loglevel -> string Lazy.t -> unit) -> gstate -> nid_t

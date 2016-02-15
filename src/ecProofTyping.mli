@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -45,14 +47,15 @@ val tc1_process_formula  : tcenv1 -> pformula -> form
 val tc1_process_exp      : tcenv1 -> [`InProc|`InOp] -> ty option -> pexpr -> expr
 val tc1_process_pattern  : tcenv1 -> pformula -> ptnenv * form
 
-(* Same as previous functions, but for PHL contexts *)
-val tc1_process_phl_form     : ?side:side -> tcenv1 -> ty -> pformula -> form
-val tc1_process_phl_formula  : ?side:side -> tcenv1 -> pformula -> form
-val tc1_process_phl_exp      : tcenv1 -> oside -> ty option -> pexpr -> expr
+(* Same as previous functions, but for *HL contexts *)
+val tc1_process_Xhl_form     : ?side:side -> tcenv1 -> ty -> pformula -> form
+val tc1_process_Xhl_formula  : ?side:side -> tcenv1 -> pformula -> form
+val tc1_process_Xhl_exp      : tcenv1 -> oside -> ty option -> pexpr -> expr
 
 val tc1_process_prhl_form    : tcenv1 -> ty -> pformula -> form
 val tc1_process_prhl_formula : tcenv1 -> pformula -> form
 
+val tc1_process_stmt : tcenv1 -> EcMemory.memtype -> pstmt -> stmt
 val tc1_process_prhl_stmt : tcenv1 -> side -> pstmt -> stmt
 
 (* -------------------------------------------------------------------- *)

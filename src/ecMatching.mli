@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -10,9 +12,9 @@ open EcParsetree
 open EcIdent
 open EcTypes
 open EcModules
-open EcEnv
 open EcFol
 open EcUnify
+open EcEnv
 
 (* -------------------------------------------------------------------- *)
 module Zipper : sig
@@ -108,19 +110,22 @@ module MEV : sig
   val get    : ident -> kind -> mevmap -> [`Unset | `Set of item] option
   val filled : mevmap -> bool
   val fold   : (ident -> item -> 'a -> 'a) -> mevmap -> 'a -> 'a
+  val assubst: EcUnify.unienv -> mevmap -> EcFol.f_subst
 end
 
 (* -------------------------------------------------------------------- *)
 exception MatchFailure
 
 type fmoptions = {
-  fm_delta : bool;
-  fm_conv  : bool;
+  fm_delta  : bool;
+  fm_conv   : bool;
+  fm_horder : bool;
 }
 
-val fmsearch : fmoptions
-val fmrigid  : fmoptions
-val fmdelta  : fmoptions
+val fmsearch   : fmoptions
+val fmrigid    : fmoptions
+val fmdelta    : fmoptions
+val fmnotation : fmoptions
 
 val f_match_core :
      fmoptions
@@ -156,7 +161,8 @@ module FPosition : sig
 
   val select : ?o:occ -> (Sid.t -> form -> select) -> form -> ptnpos
 
-  val select_form : LDecl.hyps -> occ option -> form -> form -> ptnpos
+  val select_form : ?xconv:EcReduction.xconv ->
+    LDecl.hyps -> occ option -> form -> form -> ptnpos
 
   val is_occurences_valid : Sint.t -> ptnpos -> bool
 
@@ -168,3 +174,8 @@ module FPosition : sig
 
   val topattern : ?x:EcIdent.t -> ptnpos -> form -> EcIdent.t * form
 end
+
+(* -------------------------------------------------------------------- *)
+type cptenv = CPTEnv of f_subst
+
+val can_concretize : mevmap -> EcUnify.unienv -> bool

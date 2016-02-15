@@ -1,6 +1,8 @@
 (* --------------------------------------------------------------------
- * Copyright (c) - 2012-2015 - IMDEA Software Institute and INRIA
- * Distributed under the terms of the CeCILL-C license
+ * Copyright (c) - 2012--2016 - IMDEA Software Institute
+ * Copyright (c) - 2012--2016 - Inria
+ *
+ * Distributed under the terms of the CeCILL-C-V1 license
  * -------------------------------------------------------------------- *)
 
 (* -------------------------------------------------------------------- *)
@@ -24,7 +26,7 @@ type i_pat =
   | IPwhile of s_pat
 
 and s_pat = (int * i_pat) list
- 
+
 (* -------------------------------------------------------------------- *)
 module LowSubst = struct
   let pvsubst m pv =
@@ -120,7 +122,8 @@ module LowInternal = struct
 
       let resasgn =
         match fdef.f_ret with
-        | None   -> None
+        | None -> None
+        | Some _ when is_none lv -> None
         | Some r -> Some (i_asgn (oget lv, LowSubst.esubst subst r)) in
 
       me, prelude @ body.s_node @ (otolist resasgn) in
